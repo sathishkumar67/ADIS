@@ -25,6 +25,13 @@ class Conv(nn.Module):
     def forward_fuse(self, x):
         """Apply convolution and activation without batch normalization."""
         return self.act(self.conv(x))
+    
+class DWConv(Conv):
+    """Depth-wise convolution."""
+
+    def __init__(self, c1, c2, k=1, s=1, d=1, act=True):  # ch_in, ch_out, kernel, stride, dilation, activation
+        """Initialize Depth-wise convolution with given parameters."""
+        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
 
 class Bottleneck(nn.Module):
     """Standard bottleneck."""
@@ -98,6 +105,98 @@ class SPPF(nn.Module):
         y.extend(self.m(y[-1]) for _ in range(3))
         return self.cv2(torch.cat(y, 1))
 
+class Attention(nn.Module):
+    """
+    Attention module that performs self-attention on the input tensor.
+
+    Args:
+        dim (int): The input tensor dimension.
+        num_heads (int): The number of attention heads.
+        attn_ratio (float): The ratio of the attention key dimension to the head dimension.
+
+    Attributes:
+        num_heads (int): The number of attention heads.
+        head_dim (int): The dimension of each attention head.
+        key_dim (int): The dimension of the attention key.
+        scale (float): The scaling factor for the attention scores.
+        qkv (Conv): Convolutional layer for computing the query, key, and value.
+        proj (Conv): Convolutional layer for projecting the attended values.
+        pe (Conv): Convolutional layer for positional encoding.
+    """
+
+    def __init__(self, dim, num_heads=8, attn_ratio=0.5):
+        """Initializes multi-head attention module with query, key, and value convolutions and positional encoding."""
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.key_dim = int(self.head_dim * attn_ratio)
+        self.scale = self.key_dim**-0.5
+        nh_kd = self.key_dim * num_heads
+        h = dim + nh_kd * 2
+        self.qkv = Conv(dim, h, 1, act=False)
+        self.proj = Conv(dim, dim, 1, act=False)
+        self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
+
+    def forward(self, x):
+        """
+        Forward pass of the Attention module.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            (torch.Tensor): The output tensor after self-attention.
+        """
+        B, C, H, W = x.shape
+        N = H * W
+        qkv = self.qkv(x)
+        q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
+            [self.key_dim, self.key_dim, self.head_dim], dim=2
+        )
+
+        attn = (q.transpose(-2, -1) @ k) * self.scale
+        attn = attn.softmax(dim=-1)
+        x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        x = self.proj(x)
+        return x
+
+
+class PSABlock(nn.Module):
+    """
+    PSABlock class implementing a Position-Sensitive Attention block for neural networks.
+
+    This class encapsulates the functionality for applying multi-head attention and feed-forward neural network layers
+    with optional shortcut connections.
+
+    Attributes:
+        attn (Attention): Multi-head attention module.
+        ffn (nn.Sequential): Feed-forward neural network module.
+        add (bool): Flag indicating whether to add shortcut connections.
+
+    Methods:
+        forward: Performs a forward pass through the PSABlock, applying attention and feed-forward layers.
+
+    Examples:
+        Create a PSABlock and perform a forward pass
+        >>> psablock = PSABlock(c=128, attn_ratio=0.5, num_heads=4, shortcut=True)
+        >>> input_tensor = torch.randn(1, 128, 32, 32)
+        >>> output_tensor = psablock(input_tensor)
+    """
+
+    def __init__(self, c, attn_ratio=0.5, num_heads=4, shortcut=True) -> None:
+        """Initializes the PSABlock with attention and feed-forward layers for enhanced feature extraction."""
+        super().__init__()
+
+        self.attn = Attention(c, attn_ratio=attn_ratio, num_heads=num_heads)
+        self.ffn = nn.Sequential(Conv(c, c * 2, 1), Conv(c * 2, c, 1, act=False))
+        self.add = shortcut
+
+    def forward(self, x):
+        """Executes a forward pass through PSABlock, applying attention and feed-forward layers to the input tensor."""
+        x = x + self.attn(x) if self.add else self.attn(x)
+        x = x + self.ffn(x) if self.add else self.ffn(x)
+        return x
+
 
 class C2PSA(nn.Module):
     """
@@ -152,6 +251,27 @@ class Concat(nn.Module):
     def forward(self, x):
         """Forward pass for the YOLOv8 mask Proto module."""
         return torch.cat(x, self.d)
+
+class DFL(nn.Module):
+    """
+    Integral module of Distribution Focal Loss (DFL).
+
+    Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
+    """
+
+    def __init__(self, c1=16):
+        """Initialize a convolutional layer with a given number of input channels."""
+        super().__init__()
+        self.conv = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
+        x = torch.arange(c1, dtype=torch.float)
+        self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
+        self.c1 = c1
+
+    def forward(self, x):
+        """Applies a transformer layer on input tensor 'x' and returns a tensor."""
+        b, _, a = x.shape  # batch, channels, anchors
+        return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+        # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
 
 
 
