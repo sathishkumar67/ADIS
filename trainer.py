@@ -53,7 +53,7 @@ from ultralytics.utils.plotting import plot_images, plot_labels, plot_results
 from ultralytics.utils.torch_utils import de_parallel, torch_distributed_zero_first
 from detector import DetectionModel
 from validator import DetectionValidator
-from model import YOLO
+
 
 
 class BaseTrainer:
