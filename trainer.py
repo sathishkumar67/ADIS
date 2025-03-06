@@ -766,7 +766,7 @@ class BaseTrainer:
             LOGGER.info("Closing dataloader mosaic")
             self.train_loader.dataset.close_mosaic(hyp=copy(self.args))
 
-    def build_optimizer(self, model, name="auto", lr=0.001, momentum=(0.9, 0.999), decay=1e-5):
+    def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5):
         """
         Constructs an optimizer for the given model, based on the specified optimizer name, learning rate, momentum,
         weight decay, and number of iterations.
@@ -795,12 +795,12 @@ class BaseTrainer:
                 else:  # weight (with decay)
                     g[0].append(param)
                     
-        optimizer = optim.AdamW(g[2], lr=lr, betas=momentum, weight_decay=0.0)
+        optimizer = optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
 
         optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
         optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
         LOGGER.info(
-            f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}, momentum={momentum[0]}, {momentum[1]}) with parameter groups "
+            f"{colorstr('optimizer:')} {type(optimizer).__name__}(lr={lr}, momentum={momentum}) with parameter groups "
             f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias(decay=0.0)"
         )
         return optimizer
