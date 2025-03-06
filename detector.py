@@ -73,7 +73,7 @@ class v8DetectionLoss:
     def calculate_accuracy(self, preds, targets):
         """Calculate accuracy based on predictions and targets."""
         pred_scores = preds[1] if isinstance(preds, tuple) else preds
-        pred_labels = pred_scores.argmax(dim=1)  # Get predicted labels
+        pred_labels = torch.tensor(pred_scores).argmax(dim=1)  # Get predicted labels
         true_labels = targets["cls"].view(-1)  # Actual labels
 
         correct = pred_labels.eq(true_labels).sum().item()  # Number of correct predictions
