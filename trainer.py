@@ -431,7 +431,7 @@ class BaseTrainer:
                         % (
                             f"{epoch + 1}/{self.epochs}",
                             f"{self._get_memory():.3g}G",  # (GB) GPU memory util
-                            *(avg_loss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
+                            *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
                             batch["cls"].shape[0],  # batch size, i.e. 8
                             batch["img"].shape[-1],  # imgsz, i.e 640
                         )
