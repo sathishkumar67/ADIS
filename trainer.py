@@ -359,7 +359,6 @@ class BaseTrainer:
             cls_loss_cum = 0
             dfl_loss_cum = 0
             batch_count = 0
-            print(batch_count)
             for i, batch in pbar:
                 self.run_callbacks("on_train_batch_start")
                 # Warmup
@@ -415,22 +414,28 @@ class BaseTrainer:
                 # Log
                 if RANK in {-1, 0}:
                     loss_length = self.tloss.shape[0] if len(self.tloss.shape) else 1
-                    # pbar.set_description(
-                    #     ("%11s" * 2 + "%11.4g" * (2 + loss_length))
-                    #     % (
-                    #         f"{epoch + 1}/{self.epochs}",
-                    #         f"{self._get_memory():.3g}G",  # (GB) GPU memory util
-                    #         *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
-                    #         batch["cls"].shape[0],  # batch size, i.e. 8
-                    #         batch["img"].shape[-1],  # imgsz, i.e 640
-                    #     )
-                    # )
+                    pbar.set_description(
+                        ("%11s" * 2 + "%11.4g" * (2 + loss_length))
+                        % (
+                            f"{epoch + 1}/{self.epochs}",
+                            f"{self._get_memory():.3g}G",  # (GB) GPU memory util
+                            *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
+                            batch["cls"].shape[0],  # batch size, i.e. 8
+                            batch["img"].shape[-1],  # imgsz, i.e 640
+                        )
+                    )
                     self.run_callbacks("on_batch_end")
                     if self.args.plots and ni in self.plot_idx:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
-            LOGGER.info(f"Epoch {epoch + 1}: Box Loss: {box_loss_avg:.4f}, Cls Loss: {cls_loss_avg:.4f}, DFL Loss: {dfl_loss_avg:.4f}")
+            if RANK == -1:
+                LOGGER.info(f"Epoch {epoch + 1}: AVG Box Loss: {box_loss_avg:.4f} | AVG Cls Loss: {cls_loss_avg:.4f} | AVG DFL Loss: {dfl_loss_avg:.4f}")
+            elif RANK == 0:
+                loss_items = torch.tensor([box_loss_avg, cls_loss_avg, dfl_loss_avg]).to(self.device)
+                dist.all_reduce(loss_items)
+                box_loss_avg, cls_loss_avg, dfl_loss_avg = loss_items.tolist()
+                LOGGER.info(f"Epoch {epoch + 1}: AVG Box Loss: {box_loss_avg:.4f} | AVG Cls Loss: {cls_loss_avg:.4f} | AVG DFL Loss: {dfl_loss_avg:.4f}")
 
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")
