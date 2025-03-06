@@ -25,6 +25,7 @@ from ultralytics.utils import (
 from ultralytics.models import yolo
 from detector import DetectionModel
 from trainer import DetectionTrainer
+from validator import DetectionValidator
 
 
 
@@ -1193,7 +1194,7 @@ class YOLO(Model):
             "detect": {
                 "model": DetectionModel,
                 "trainer": DetectionTrainer,
-                "validator": yolo.detect.DetectionValidator,
+                "validator": DetectionValidator,
                 "predictor": yolo.detect.DetectionPredictor,
             }
         }
