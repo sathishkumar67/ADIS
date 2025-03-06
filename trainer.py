@@ -364,6 +364,7 @@ class BaseTrainer:
             cls_loss_cum = 0
             dfl_loss_cum = 0
             num_batches = 0
+            print(num_batches)
             for i, batch in pbar:
                 self.run_callbacks("on_train_batch_start")
                 # Warmup
@@ -437,7 +438,7 @@ class BaseTrainer:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
-            LOGGER.info(f"Epoch {epoch + 1}: Box Loss: {box_loss_avg:.4f}, Cls Loss: {cls_loss_avg:.4f}, DFL Loss: {dfl_loss_avg:.4f}")
+            print(f"Epoch {epoch + 1}: Box Loss: {box_loss_avg:.4f}, Cls Loss: {cls_loss_avg:.4f}, DFL Loss: {dfl_loss_avg:.4f}")
 
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")

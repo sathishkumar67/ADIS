@@ -1181,7 +1181,7 @@ class Model(torch.nn.Module):
 class YOLO(Model):
     """YOLO (You Only Look Once) object detection model."""
 
-    def __init__(self, model="yolo11n.pt", task=None, verbose=False):
+    def __init__(self, model="yolo11n.pt", task="detect", verbose=False):
         """Initialize YOLO model, switching to YOLOWorld if model filename contains '-world'."""
         super().__init__(model=model, task=task, verbose=verbose)
 
