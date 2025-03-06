@@ -100,7 +100,6 @@ class BaseTrainer:
         self.check_resume(overrides)
         self.device = select_device(self.args.device, self.args.batch)
         self.validator = None
-        self.validator_train = None
         self.metrics = None
         self.plots = {}
         init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic)
@@ -289,7 +288,6 @@ class BaseTrainer:
                 self.testset, batch_size=batch_size if self.args.task == "obb" else batch_size * 2, rank=-1, mode="val"
             )
             self.validator = self.get_validator()
-            self.validator_train = self.get_validator_train()
             metric_keys = self.validator.metrics.keys + self.label_loss_items(prefix="val")
             self.metrics = dict(zip(metric_keys, [0] * len(metric_keys)))
             self.ema = ModelEMA(self.model)
@@ -640,10 +638,6 @@ class BaseTrainer:
         """Returns a NotImplementedError when the get_validator function is called."""
         raise NotImplementedError("get_validator function not implemented in trainer")
     
-    def get_validator_train(self):
-        """Returns a NotImplementedError when the get_validator function is called."""
-        raise NotImplementedError("get_validator function not implemented in trainer")
-
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
         """Returns dataloader derived from torch.data.Dataloader."""
         raise NotImplementedError("get_dataloader function not implemented in trainer")
@@ -705,12 +699,6 @@ class BaseTrainer:
         for f in self.last, self.best:
             if f.exists():
                 if f is self.best:
-                    LOGGER.info(f"\nValidating Training Data {f}...")
-                    self.validator_train.args.plots = self.args.plots
-                    self.metrics = self.validator_train(model=f)
-                    self.metrics.pop("fitness", None)
-                    self.run_callbacks("on_fit_epoch_end")
-
                     LOGGER.info(f"\nValidating Validation Data {f}...")
                     self.validator.args.plots = self.args.plots
                     self.metrics = self.validator(model=f)
@@ -906,13 +894,6 @@ class DetectionTrainer(BaseTrainer):
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )
 
-    def get_validator_train(self):
-        """Returns a DetectionValidator for YOLO model validation."""
-        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
-        return yolo.detect.DetectionValidator(
-            self.train_loader, save_dir=f"{self.save_dir}/train_metric", args=copy(self.args), _callbacks=self.callbacks
-        )
-    
     def label_loss_items(self, loss_items=None, prefix="train"):
         """
         Returns a loss dict with labelled training loss items tensor.
