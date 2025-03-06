@@ -405,12 +405,12 @@ class BaseTrainer:
                 box_loss_cum += self.loss_items[0].item()
                 cls_loss_cum += self.loss_items[1].item()
                 dfl_loss_cum += self.loss_items[2].item()
-                num_batches += 1
+                batch_count += 1
                 
                 # Calculate and print average losses per epoch
-                box_loss_avg = box_loss_cum / num_batches
-                cls_loss_avg = cls_loss_cum / num_batches
-                dfl_loss_avg = dfl_loss_cum / num_batches
+                box_loss_avg = box_loss_cum / batch_count
+                cls_loss_avg = cls_loss_cum / batch_count
+                dfl_loss_avg = dfl_loss_cum / batch_count
 
                 # Log
                 if RANK in {-1, 0}:
