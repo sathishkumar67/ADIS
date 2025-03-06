@@ -297,15 +297,12 @@ class BaseTrainer:
         # Optimizer
         self.accumulate = max(round(self.args.nbs / self.batch_size), 1)  # accumulate loss before optimizing
         weight_decay = self.args.weight_decay * self.batch_size * self.accumulate / self.args.nbs  # scale weight_decay
-        iterations = math.ceil(len(self.train_loader.dataset) / max(self.batch_size, self.args.nbs)) * self.epochs
         self.optimizer = self.build_optimizer(
             model=self.model,
             name=self.args.optimizer,
             lr=self.args.lr0,
             momentum=self.args.momentum,
-            decay=weight_decay,
-            iterations=iterations,
-        )
+            decay=weight_decay)
         # Scheduler
         self._setup_scheduler()
         self.stopper, self.stop = EarlyStopping(patience=self.args.patience), False
@@ -337,8 +334,6 @@ class BaseTrainer:
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
         epoch = self.start_epoch
         self.optimizer.zero_grad()  # zero any resumed gradients to ensure stability on train start
-        total_loss = 0
-        batch_count = 0
         while True:
             self.epoch = epoch
             self.run_callbacks("on_train_epoch_start")
@@ -363,8 +358,8 @@ class BaseTrainer:
             box_loss_cum = 0
             cls_loss_cum = 0
             dfl_loss_cum = 0
-            num_batches = 0
-            print(num_batches)
+            batch_count = 0
+            print(batch_count)
             for i, batch in pbar:
                 self.run_callbacks("on_train_batch_start")
                 # Warmup
@@ -389,12 +384,6 @@ class BaseTrainer:
                     self.tloss = (
                         (self.tloss * i + self.loss_items) / (i + 1) if self.tloss is not None else self.loss_items
                     )
-                    # update total loss and batch count
-                    total_loss += self.loss.item()
-                    batch_count += 1
-                    
-                    # calculate average loss 
-                    avg_loss = total_loss / batch_count
 
                 # Backward
                 self.scaler.scale(self.loss).backward()
@@ -426,22 +415,22 @@ class BaseTrainer:
                 # Log
                 if RANK in {-1, 0}:
                     loss_length = self.tloss.shape[0] if len(self.tloss.shape) else 1
-                    pbar.set_description(
-                        ("%11s" * 2 + "%11.4g" * (2 + loss_length))
-                        % (
-                            f"{epoch + 1}/{self.epochs}",
-                            f"{self._get_memory():.3g}G",  # (GB) GPU memory util
-                            *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
-                            batch["cls"].shape[0],  # batch size, i.e. 8
-                            batch["img"].shape[-1],  # imgsz, i.e 640
-                        )
-                    )
+                    # pbar.set_description(
+                    #     ("%11s" * 2 + "%11.4g" * (2 + loss_length))
+                    #     % (
+                    #         f"{epoch + 1}/{self.epochs}",
+                    #         f"{self._get_memory():.3g}G",  # (GB) GPU memory util
+                    #         *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
+                    #         batch["cls"].shape[0],  # batch size, i.e. 8
+                    #         batch["img"].shape[-1],  # imgsz, i.e 640
+                    #     )
+                    # )
                     self.run_callbacks("on_batch_end")
                     if self.args.plots and ni in self.plot_idx:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
-            print(f"Epoch {epoch + 1}: Box Loss: {box_loss_avg:.4f}, Cls Loss: {cls_loss_avg:.4f}, DFL Loss: {dfl_loss_avg:.4f}")
+            LOGGER.info(f"Epoch {epoch + 1}: Box Loss: {box_loss_avg:.4f}, Cls Loss: {cls_loss_avg:.4f}, DFL Loss: {dfl_loss_avg:.4f}")
 
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")
@@ -777,7 +766,7 @@ class BaseTrainer:
             LOGGER.info("Closing dataloader mosaic")
             self.train_loader.dataset.close_mosaic(hyp=copy(self.args))
 
-    def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5, iterations=1e5):
+    def build_optimizer(self, model, name="auto", lr=0.001, momentum=(0.9, 0.999), decay=1e-5):
         """
         Constructs an optimizer for the given model, based on the specified optimizer name, learning rate, momentum,
         weight decay, and number of iterations.
@@ -789,8 +778,6 @@ class BaseTrainer:
             lr (float, optional): The learning rate for the optimizer. Default: 0.001.
             momentum (float, optional): The momentum factor for the optimizer. Default: 0.9.
             decay (float, optional): The weight decay for the optimizer. Default: 1e-5.
-            iterations (float, optional): The number of iterations, which determines the optimizer if
-                name is 'auto'. Default: 1e5.
 
         Returns:
             (torch.optim.Optimizer): The constructed optimizer.
@@ -808,7 +795,7 @@ class BaseTrainer:
                 else:  # weight (with decay)
                     g[0].append(param)
                     
-        optimizer = optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
+        optimizer = optim.AdamW(g[2], lr=lr, betas=momentum, weight_decay=0.0)
 
         optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
         optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
