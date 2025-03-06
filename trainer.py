@@ -337,6 +337,8 @@ class BaseTrainer:
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
         epoch = self.start_epoch
         self.optimizer.zero_grad()  # zero any resumed gradients to ensure stability on train start
+        total_loss = 0
+        batch_count = 0
         while True:
             self.epoch = epoch
             self.run_callbacks("on_train_epoch_start")
@@ -387,6 +389,12 @@ class BaseTrainer:
                     self.tloss = (
                         (self.tloss * i + self.loss_items) / (i + 1) if self.tloss is not None else self.loss_items
                     )
+                    # update total loss and batch count
+                    total_loss += self.loss.item()
+                    batch_count += 1
+                    
+                    # calculate average loss 
+                    avg_loss = total_loss / batch_count
 
                 # Backward
                 self.scaler.scale(self.loss).backward()
@@ -423,10 +431,7 @@ class BaseTrainer:
                         % (
                             f"{epoch + 1}/{self.epochs}",
                             f"{self._get_memory():.3g}G",  # (GB) GPU memory util
-                            # *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),  # losses
-                            f"{box_loss_avg:.4f}",
-                            f"{cls_loss_avg:.4f}",
-                            f"{dfl_loss_avg:.4f}",
+                            *(avg_loss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),
                             batch["cls"].shape[0],  # batch size, i.e. 8
                             batch["img"].shape[-1],  # imgsz, i.e 640
                         )
