@@ -1,16 +1,14 @@
 import inspect
 from pathlib import Path
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, List, Union
 
 import numpy as np
 import torch
-import torch.optim as optim
 from PIL import Image
 
 from ultralytics.cfg import TASK2DATA, get_cfg, get_save_dir
 from ultralytics.engine.results import Results
-from ultralytics.utils import ROOT, yaml_load
-from ultralytics.hub import HUB_WEB_ROOT
+from ultralytics.hub import HUB_WEB_ROOT, HUBTrainingSession
 from ultralytics.nn.tasks import attempt_load_one_weight, guess_model_task, yaml_model_load
 from ultralytics.utils import (
     ARGV,
@@ -24,10 +22,9 @@ from ultralytics.utils import (
     emojis,
     yaml_load,
 )
+from ultralytics.models import yolo
 from detector import DetectionModel
-from trainer import DetectionTrainer
-from predictor import DetectionPredictor
-from validator import DetectionValidator
+
 
 
 class Model(torch.nn.Module):
@@ -88,7 +85,6 @@ class Model(torch.nn.Module):
         model: Union[str, Path] = "yolo11n.pt",
         task: str = None,
         verbose: bool = False,
-        optimizer: Optional[optim.Optimizer] = None,
     ) -> None:
         """
         Initializes a new instance of the YOLO model class.
@@ -128,8 +124,22 @@ class Model(torch.nn.Module):
         self.session = None  # HUB session
         self.task = task  # task type
         self.model_name = None  # model name
-        self.optimizer = optimizer
         model = str(model).strip()
+
+        # Check if Ultralytics HUB model from https://hub.ultralytics.com
+        if self.is_hub_model(model):
+            # Fetch model from HUB
+            checks.check_requirements("hub-sdk>=0.0.12")
+            session = HUBTrainingSession.create_session(model)
+            model = session.model_file
+            if session.train_args:  # training sent from HUB
+                self.session = session
+
+        # Check if Triton Server model
+        elif self.is_triton_model(model):
+            self.model_name = self.model = model
+            self.overrides["task"] = task or "detect"  # set `task=detect` if not explicitly set
+            return
 
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
@@ -171,6 +181,53 @@ class Model(torch.nn.Module):
             ...     print(f"Detected {len(r)} objects in image")
         """
         return self.predict(source, stream, **kwargs)
+
+    @staticmethod
+    def is_triton_model(model: str) -> bool:
+        """
+        Checks if the given model string is a Triton Server URL.
+
+        This static method determines whether the provided model string represents a valid Triton Server URL by
+        parsing its components using urllib.parse.urlsplit().
+
+        Args:
+            model (str): The model string to be checked.
+
+        Returns:
+            (bool): True if the model string is a valid Triton Server URL, False otherwise.
+
+        Examples:
+            >>> Model.is_triton_model("http://localhost:8000/v2/models/yolo11n")
+            True
+            >>> Model.is_triton_model("yolo11n.pt")
+            False
+        """
+        from urllib.parse import urlsplit
+
+        url = urlsplit(model)
+        return url.netloc and url.path and url.scheme in {"http", "grpc"}
+
+    @staticmethod
+    def is_hub_model(model: str) -> bool:
+        """
+        Check if the provided model is an Ultralytics HUB model.
+
+        This static method determines whether the given model string represents a valid Ultralytics HUB model
+        identifier.
+
+        Args:
+            model (str): The model string to check.
+
+        Returns:
+            (bool): True if the model is a valid Ultralytics HUB model, False otherwise.
+
+        Examples:
+            >>> Model.is_hub_model("https://hub.ultralytics.com/models/MODEL")
+            True
+            >>> Model.is_hub_model("yolo11n.pt")
+            False
+        """
+        return model.startswith(f"{HUB_WEB_ROOT}/models/")
 
     def _new(self, cfg: str, task=None, model=None, verbose=False) -> None:
         """
@@ -352,8 +409,6 @@ class Model(torch.nn.Module):
 
         updates = {
             "model": deepcopy(self.model).half() if isinstance(self.model, torch.nn.Module) else self.model,
-            "optimizer": self.optimizer.state_dict() if self.optimizer else None,
-            "args": self.overrides,
             "date": datetime.now().isoformat(),
             "version": __version__,
             "license": "AGPL-3.0 License (https://ultralytics.com/license)",
@@ -729,6 +784,11 @@ class Model(torch.nn.Module):
             >>> results = model.train(data="coco8.yaml", epochs=3)
         """
         self._check_is_pytorch_model()
+        if hasattr(self.session, "model") and self.session.model.id:  # Ultralytics HUB session with loaded model
+            if any(kwargs):
+                LOGGER.warning("WARNING ⚠️ using HUB training arguments, ignoring local training arguments.")
+            kwargs = self.session.train_args  # overwrite kwargs
+
         checks.check_pip_update_available()
 
         overrides = yaml_load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
@@ -747,6 +807,7 @@ class Model(torch.nn.Module):
             self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml)
             self.model = self.trainer.model
 
+        self.trainer.hub_session = self.session  # attach optional HUB session
         self.trainer.train()
         # Update model and cfg after training
         if RANK in {-1, 0}:
@@ -1004,6 +1065,11 @@ class Model(torch.nn.Module):
         include = {"imgsz", "data", "task", "single_cls"}  # only remember these arguments when loading a PyTorch model
         return {k: v for k, v in args.items() if k in include}
 
+    # def __getattr__(self, attr):
+    #    """Raises error if object has no requested attribute."""
+    #    name = self.__class__.__name__
+    #    raise AttributeError(f"'{name}' object has no attribute '{attr}'. See valid attributes below.\n{self.__doc__}")
+
     def _smart_load(self, key: str):
         """
         Loads the appropriate module based on the model task.
@@ -1111,21 +1177,22 @@ class Model(torch.nn.Module):
         """
         return self._modules["model"] if name == "model" else getattr(self.model, name)
     
-    
+
 class YOLO(Model):
     """YOLO (You Only Look Once) object detection model."""
 
-    def __init__(self, model="yolo11n.pt", task="detect", verbose=True):
-        """Initialize YOLO model."""
+    def __init__(self, model="yolo11n.pt", task=None, verbose=False):
+        """Initialize YOLO model, switching to YOLOWorld if model filename contains '-world'."""
         super().__init__(model=model, task=task, verbose=verbose)
-        
+
     @property
     def task_map(self):
         """Map head to model, trainer, validator, and predictor classes."""
         return {
             "detect": {
                 "model": DetectionModel,
-                "trainer": DetectionTrainer,
-                "validator": DetectionValidator,
-                "predictor": DetectionPredictor,
-            }}
+                "trainer": yolo.detect.DetectionTrainer,
+                "validator": yolo.detect.DetectionValidator,
+                "predictor": yolo.detect.DetectionPredictor,
+            }
+        }

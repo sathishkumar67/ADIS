@@ -1,19 +1,19 @@
 import gc
 import math
+import random
 import os
 import subprocess
 import time
-import math
-import random
 import warnings
 from copy import copy, deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
+
 import numpy as np
 import torch
-import torch.nn as nn
 from torch import distributed as dist
-from torch import optim
+from torch import nn, optim
+
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
 from ultralytics.nn.tasks import attempt_load_one_weight, attempt_load_weights
@@ -34,26 +34,23 @@ from ultralytics.utils.autobatch import check_train_batch_size
 from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
 from ultralytics.utils.dist import ddp_cleanup, generate_ddp_command
 from ultralytics.utils.files import get_latest_run
+from ultralytics.data import build_dataloader, build_yolo_dataset
+from ultralytics.utils.plotting import plot_images, plot_labels, plot_results
 from ultralytics.utils.torch_utils import (
     TORCH_2_4,
     EarlyStopping,
     ModelEMA,
     autocast,
-    convert_optimizer_state_dict_to_fp16,
     init_seeds,
     one_cycle,
     select_device,
     strip_optimizer,
     torch_distributed_zero_first,
     unset_deterministic,
+    de_parallel
 )
-from ultralytics.data import build_dataloader, build_yolo_dataset
-from ultralytics.utils import LOGGER, RANK
-from ultralytics.utils.plotting import plot_images, plot_labels, plot_results
-from ultralytics.utils.torch_utils import de_parallel, torch_distributed_zero_first
+from ultralytics.models import yolo
 from detector import DetectionModel
-from validator import DetectionValidator
-
 
 
 class BaseTrainer:
@@ -103,6 +100,7 @@ class BaseTrainer:
         self.check_resume(overrides)
         self.device = select_device(self.args.device, self.args.batch)
         self.validator = None
+        self.validator_train = None
         self.metrics = None
         self.plots = {}
         init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic)
@@ -291,6 +289,7 @@ class BaseTrainer:
                 self.testset, batch_size=batch_size if self.args.task == "obb" else batch_size * 2, rank=-1, mode="val"
             )
             self.validator = self.get_validator()
+            self.validator_train = self.get_validator_train()
             metric_keys = self.validator.metrics.keys + self.label_loss_items(prefix="val")
             self.metrics = dict(zip(metric_keys, [0] * len(metric_keys)))
             self.ema = ModelEMA(self.model)
@@ -350,7 +349,7 @@ class BaseTrainer:
             self.model.train()
             if RANK != -1:
                 self.train_loader.sampler.set_epoch(epoch)
-            pbar = enumerate(self.train_loader) 
+            pbar = enumerate(self.train_loader)
             # Update dataloader attributes (optional)
             if epoch == (self.epochs - self.args.close_mosaic):
                 self._close_dataloader_mosaic()
@@ -360,6 +359,11 @@ class BaseTrainer:
                 LOGGER.info(self.progress_string())
                 pbar = TQDM(enumerate(self.train_loader), total=nb)
             self.tloss = None
+            # Initialize cumulative loss variables
+            box_loss_cum = 0
+            cls_loss_cum = 0
+            dfl_loss_cum = 0
+            num_batches = 0
             for i, batch in pbar:
                 self.run_callbacks("on_train_batch_start")
                 # Warmup
@@ -388,7 +392,6 @@ class BaseTrainer:
                 # Backward
                 self.scaler.scale(self.loss).backward()
 
-                # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
                 if ni - last_opt_step >= self.accumulate:
                     self.optimizer_step()
                     last_opt_step = ni
@@ -402,6 +405,16 @@ class BaseTrainer:
                             self.stop = broadcast_list[0]
                         if self.stop:  # training time exceeded
                             break
+                # Update cumulative losses
+                box_loss_cum += self.loss_items[0].item()
+                cls_loss_cum += self.loss_items[1].item()
+                dfl_loss_cum += self.loss_items[2].item()
+                num_batches += 1
+                
+                # Calculate and print average losses per epoch
+                box_loss_avg = box_loss_cum / num_batches
+                cls_loss_avg = cls_loss_cum / num_batches
+                dfl_loss_avg = dfl_loss_cum / num_batches
 
                 # Log
                 if RANK in {-1, 0}:
@@ -411,7 +424,10 @@ class BaseTrainer:
                         % (
                             f"{epoch + 1}/{self.epochs}",
                             f"{self._get_memory():.3g}G",  # (GB) GPU memory util
-                            *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),  # losses
+                            # *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),  # losses
+                            f"{box_loss_avg:.4f}",
+                            f"{cls_loss_avg:.4f}",
+                            f"{dfl_loss_avg:.4f}",
                             batch["cls"].shape[0],  # batch size, i.e. 8
                             batch["img"].shape[-1],  # imgsz, i.e 640
                         )
@@ -421,6 +437,7 @@ class BaseTrainer:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
+            LOGGER.info(f"Epoch {epoch + 1}: Box Loss: {box_loss_avg:.4f}, Cls Loss: {cls_loss_avg:.4f}, DFL Loss: {dfl_loss_avg:.4f}")
 
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")
@@ -524,7 +541,7 @@ class BaseTrainer:
                 "model": None,  # resume and final checkpoints derive from EMA
                 "ema": deepcopy(self.ema.ema).half(),
                 "updates": self.ema.updates,
-                "optimizer": convert_optimizer_state_dict_to_fp16(deepcopy(self.optimizer.state_dict())),
+                "optimizer": deepcopy(self.optimizer.state_dict()),
                 "train_args": vars(self.args),  # save as dict
                 "train_metrics": {**self.metrics, **{"fitness": self.fitness}},
                 "train_results": self.read_results_csv(),
@@ -621,6 +638,10 @@ class BaseTrainer:
     def get_validator(self):
         """Returns a NotImplementedError when the get_validator function is called."""
         raise NotImplementedError("get_validator function not implemented in trainer")
+    
+    def get_validator_train(self):
+        """Returns a NotImplementedError when the get_validator function is called."""
+        raise NotImplementedError("get_validator function not implemented in trainer")
 
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
         """Returns dataloader derived from torch.data.Dataloader."""
@@ -680,15 +701,16 @@ class BaseTrainer:
 
     def final_eval(self):
         """Performs final evaluation and validation for object detection YOLO model."""
-        ckpt = {}
         for f in self.last, self.best:
             if f.exists():
-                if f is self.last:
-                    ckpt = strip_optimizer(f)
-                elif f is self.best:
-                    k = "train_results"  # update best.pt train_metrics from last.pt
-                    strip_optimizer(f, updates={k: ckpt[k]} if k in ckpt else None)
-                    LOGGER.info(f"\nValidating {f}...")
+                if f is self.best:
+                    LOGGER.info(f"\nValidating Training Data {f}...")
+                    self.validator_train.args.plots = self.args.plots
+                    self.metrics = self.validator_train(model=f)
+                    self.metrics.pop("fitness", None)
+                    self.run_callbacks("on_fit_epoch_end")
+
+                    LOGGER.info(f"\nValidating Validation Data {f}...")
                     self.validator.args.plots = self.args.plots
                     self.metrics = self.validator(model=f)
                     self.metrics.pop("fitness", None)
@@ -781,16 +803,6 @@ class BaseTrainer:
         """
         g = [], [], []  # optimizer parameter groups
         bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
-        if name == "auto":
-            LOGGER.info(
-                f"{colorstr('optimizer:')} 'optimizer=auto' found, "
-                f"ignoring 'lr0={self.args.lr0}' and 'momentum={self.args.momentum}' and "
-                f"determining best 'optimizer', 'lr0' and 'momentum' automatically... "
-            )
-            nc = self.data.get("nc", 10)  # number of classes
-            lr_fit = round(0.002 * 5 / (4 + nc), 6)  # lr0 fit equation to 6 decimal places
-            name, lr, momentum = ("SGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
-            self.args.warmup_bias_lr = 0.0  # no higher than 0.01 for Adam
 
         for module_name, module in model.named_modules():
             for param_name, param in module.named_parameters(recurse=False):
@@ -801,20 +813,8 @@ class BaseTrainer:
                     g[1].append(param)
                 else:  # weight (with decay)
                     g[0].append(param)
-
-        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "auto"}
-        name = {x.lower(): x for x in optimizers}.get(name.lower())
-        if name in {"Adam", "Adamax", "AdamW", "NAdam", "RAdam"}:
-            optimizer = getattr(optim, name, optim.Adam)(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
-        elif name == "RMSProp":
-            optimizer = optim.RMSprop(g[2], lr=lr, momentum=momentum)
-        elif name == "SGD":
-            optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
-        else:
-            raise NotImplementedError(
-                f"Optimizer '{name}' not found in list of available optimizers {optimizers}. "
-                "Request support for addition optimizers at https://github.com/ultralytics/ultralytics."
-            )
+                    
+        optimizer = optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
 
         optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
         optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
@@ -823,142 +823,6 @@ class BaseTrainer:
             f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias(decay=0.0)"
         )
         return optimizer
-    
-    
-    
-class DetectionTrainer(BaseTrainer):
-    """
-    A class extending the BaseTrainer class for training based on a detection model.
-
-    Example:
-        ```python
-        from ultralytics.models.yolo.detect import DetectionTrainer
-
-        args = dict(model="yolo11n.pt", data="coco8.yaml", epochs=3)
-        trainer = DetectionTrainer(overrides=args)
-        trainer.train()
-        ```
-    """
-
-    def build_dataset(self, img_path, mode="train", batch=None):
-        """
-        Build YOLO Dataset.
-
-        Args:
-            img_path (str): Path to the folder containing images.
-            mode (str): `train` mode or `val` mode, users are able to customize different augmentations for each mode.
-            batch (int, optional): Size of batches, this is for `rect`. Defaults to None.
-        """
-        gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
-        return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
-
-    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
-        """Construct and return dataloader."""
-        assert mode in {"train", "val"}, f"Mode must be 'train' or 'val', not {mode}."
-        with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
-            dataset = self.build_dataset(dataset_path, mode, batch_size)
-        shuffle = mode == "train"
-        if getattr(dataset, "rect", False) and shuffle:
-            LOGGER.warning("WARNING ⚠️ 'rect=True' is incompatible with DataLoader shuffle, setting shuffle=False")
-            shuffle = False
-        workers = self.args.workers if mode == "train" else self.args.workers * 2
-        return build_dataloader(dataset, batch_size, workers, shuffle, rank)  # return dataloader
-
-    def preprocess_batch(self, batch):
-        """Preprocesses a batch of images by scaling and converting to float."""
-        batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 255
-        if self.args.multi_scale:
-            imgs = batch["img"]
-            sz = (
-                random.randrange(int(self.args.imgsz * 0.5), int(self.args.imgsz * 1.5 + self.stride))
-                // self.stride
-                * self.stride
-            )  # size
-            sf = sz / max(imgs.shape[2:])  # scale factor
-            if sf != 1:
-                ns = [
-                    math.ceil(x * sf / self.stride) * self.stride for x in imgs.shape[2:]
-                ]  # new shape (stretched to gs-multiple)
-                imgs = nn.functional.interpolate(imgs, size=ns, mode="bilinear", align_corners=False)
-            batch["img"] = imgs
-        return batch
-
-    def set_model_attributes(self):
-        """Nl = de_parallel(self.model).model[-1].nl  # number of detection layers (to scale hyps)."""
-        # self.args.box *= 3 / nl  # scale to layers
-        # self.args.cls *= self.data["nc"] / 80 * 3 / nl  # scale to classes and layers
-        # self.args.cls *= (self.args.imgsz / 640) ** 2 * 3 / nl  # scale to image size and layers
-        self.model.nc = self.data["nc"]  # attach number of classes to model
-        self.model.names = self.data["names"]  # attach class names to model
-        self.model.args = self.args  # attach hyperparameters to model
-        # TODO: self.model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc
-
-    def get_model(self, cfg=None, weights=None, verbose=True):
-        """Return a YOLO detection model."""
-        model = DetectionModel(cfg, nc=self.data["nc"], verbose=verbose and RANK == -1)
-        if weights:
-            model.load(weights)
-        return model
-
-    def get_validator(self):
-        """Returns a DetectionValidator for YOLO model validation."""
-        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
-        return DetectionValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
-        )
-
-    def label_loss_items(self, loss_items=None, prefix="train"):
-        """
-        Returns a loss dict with labelled training loss items tensor.
-
-        Not needed for classification but necessary for segmentation & detection
-        """
-        keys = [f"{prefix}/{x}" for x in self.loss_names]
-        if loss_items is not None:
-            loss_items = [round(float(x), 5) for x in loss_items]  # convert tensors to 5 decimal place floats
-            return dict(zip(keys, loss_items))
-        else:
-            return keys
-
-    def progress_string(self):
-        """Returns a formatted string of training progress with epoch, GPU memory, loss, instances and size."""
-        return ("\n" + "%11s" * (4 + len(self.loss_names))) % (
-            "Epoch",
-            "GPU_mem",
-            *self.loss_names,
-            "Instances",
-            "Size",
-        )
-
-    def plot_training_samples(self, batch, ni):
-        """Plots training samples with their annotations."""
-        plot_images(
-            images=batch["img"],
-            batch_idx=batch["batch_idx"],
-            cls=batch["cls"].squeeze(-1),
-            bboxes=batch["bboxes"],
-            paths=batch["im_file"],
-            fname=self.save_dir / f"train_batch{ni}.jpg",
-            on_plot=self.on_plot,
-        )
-
-    def plot_metrics(self):
-        """Plots metrics from a CSV file."""
-        plot_results(file=self.csv, on_plot=self.on_plot)  # save results.png
-
-    def plot_training_labels(self):
-        """Create a labeled training plot of the YOLO model."""
-        boxes = np.concatenate([lb["bboxes"] for lb in self.train_loader.dataset.labels], 0)
-        cls = np.concatenate([lb["cls"] for lb in self.train_loader.dataset.labels], 0)
-        plot_labels(boxes, cls.squeeze(), names=self.data["names"], save_dir=self.save_dir, on_plot=self.on_plot)
-
-    def auto_batch(self):
-        """Get batch size by calculating memory occupation of model."""
-        train_dataset = self.build_dataset(self.trainset, mode="train", batch=16)
-        # 4 for mosaic augmentation
-        max_num_obj = max(len(label["cls"]) for label in train_dataset.labels) * 4
-        return super().auto_batch(max_num_obj)
-    
 
 class DetectionTrainer(BaseTrainer):
     """
@@ -1037,10 +901,17 @@ class DetectionTrainer(BaseTrainer):
     def get_validator(self):
         """Returns a DetectionValidator for YOLO model validation."""
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
-        return DetectionValidator(
+        return yolo.detect.DetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )
 
+    def get_validator_train(self):
+        """Returns a DetectionValidator for YOLO model validation."""
+        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+        return yolo.detect.DetectionValidator(
+            self.train_loader, save_dir=f"{self.save_dir}/train_metric", args=copy(self.args), _callbacks=self.callbacks
+        )
+    
     def label_loss_items(self, loss_items=None, prefix="train"):
         """
         Returns a loss dict with labelled training loss items tensor.
