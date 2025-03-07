@@ -168,6 +168,9 @@ class DetectionValidator(BaseValidator):
         stats = {k: torch.cat(v, 0).cpu().numpy() if len(v) and isinstance(v[0], torch.Tensor) else v for k, v in self.stats.items()}
         self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=self.nc)
         self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=self.nc)
+        # move to device
+        self.nt_per_class = torch.tensor(self.nt_per_class, device=self.device)
+        self.nt_per_image = torch.tensor(self.nt_per_image, device=self.device) 
         stats.pop("target_img", None)
         # Compute overall mean IoU from the stored iou values
         if len(stats["iou"]):
