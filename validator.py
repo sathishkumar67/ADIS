@@ -167,17 +167,17 @@ class DetectionValidator(BaseValidator):
             for k in self.stats.keys():
                 self.stats[k].append(stat[k])
 
-            # calculate iou per class
-            iou_per_class = torch.zeros((nl, npr), device=self.device)
-            for i, (t, p) in enumerate(zip(bbox, predn[:, :4])):
-                iou_per_class[i] = box_iou(t.unsqueeze(0), p.unsqueeze(0))
-            self.iou_per_class.append(iou_per_class)
+            # # calculate iou per class
+            # iou_per_class = torch.zeros((nl, npr), device=self.device)
+            # for i, (t, p) in enumerate(zip(bbox, predn[:, :4])):
+            #     iou_per_class[i] = box_iou(t.unsqueeze(0), p.unsqueeze(0))
+            # self.iou_per_class.append(iou_per_class)
             
-            # calculate accuracy per class
-            accuracy_per_class = torch.zeros((nl, npr), device=self.device)
-            for i, (t, p) in enumerate(zip(cls, predn[:, 5])):
-                accuracy_per_class[i] = t == p
-            self.accuracy_per_class.append(accuracy_per_class)
+            # # calculate accuracy per class
+            # accuracy_per_class = []
+            # for i, (t, p) in enumerate(zip(cls, predn[:, 5])):
+            #     accuracy_per_class.append((t == p).sum() = t == p
+            # self.accuracy_per_class.append(accuracy_per_class)
             
             # Save
             if self.args.save_json:
@@ -219,8 +219,8 @@ class DetectionValidator(BaseValidator):
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
                 # print per-class iou and accuracy
-                LOGGER.info(f"{'iou':>10s} {self.iou_per_class[i].mean():.3f}")
-                LOGGER.info(f"{'accuracy':>10s} {self.accuracy_per_class[i].mean():.3f}")
+                # LOGGER.info(f"{'iou':>10s} {self.iou_per_class[i].mean():.3f}")
+                # LOGGER.info(f"{'accuracy':>10s} {self.accuracy_per_class[i].mean():.3f}")
 
         if self.args.plots:
             for normalize in True, False:
