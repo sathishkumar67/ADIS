@@ -44,6 +44,9 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
+        self.total_iou = 0
+        self.total_accuracy = 0
+        self.batch_count = 0
 
     def preprocess(self, batch):
         """Preprocesses batch of images for YOLO training."""
@@ -157,6 +160,11 @@ class DetectionValidator(BaseValidator):
             # Evaluate
             if nl:
                 stat["tp"] = self._process_batch(predn, bbox, cls)
+                iou = box_iou(bbox, predn[:, :4])
+                accuracy = (iou.diagonal() > 0.5).float().mean().item()  # Example accuracy calculation
+                self.total_iou += iou.diagonal().mean().item()
+                self.total_accuracy += accuracy
+                self.batch_count += 1
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -192,6 +200,8 @@ class DetectionValidator(BaseValidator):
         """Prints training/validation set metrics per class."""
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
+        LOGGER.info(f"Average IoU: {self.total_iou / self.batch_count:.3f}")
+        LOGGER.info(f"Average Accuracy: {self.total_accuracy / self.batch_count:.3f}")
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
