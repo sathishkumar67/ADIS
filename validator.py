@@ -1,3 +1,5 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 import os
 from pathlib import Path
 
@@ -44,11 +46,6 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
-        self.iou = []
-        self.accuracy = []
-        self.total_iou = 0
-        self.total_accuracy = 0
-        self.batch_count = 0
 
     def preprocess(self, batch):
         """Preprocesses batch of images for YOLO training."""
@@ -87,7 +84,7 @@ class DetectionValidator(BaseValidator):
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
-        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
+        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[], accuracy=[], iou=[])
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
@@ -158,12 +155,19 @@ class DetectionValidator(BaseValidator):
             predn = self._prepare_pred(pred, pbatch)
             stat["conf"] = predn[:, 4]
             stat["pred_cls"] = predn[:, 5]
-            
+
+            # Evaluate
+            if nl:
+                stat["tp"] = self._process_batch(predn, bbox, cls)
+            if self.args.plots:
+                self.confusion_matrix.process_batch(predn, bbox, cls)
+            for k in self.stats.keys():
+                self.stats[k].append(stat[k])
 
             # Calculate IoU for each prediction
             for i, p in enumerate(pred):
                 iou = box_iou(bbox, p[:4].unsqueeze(0))  # Calculate IoU
-                self.iou.append(iou.max().item())  # Save maximum IoU
+                self.stats['iou'].append(iou.max().item())  # Save maximum IoU
 
             # Calculate accuracy for each class
             for c in self.names:
@@ -171,20 +175,7 @@ class DetectionValidator(BaseValidator):
                     correct_preds = (stat['pred_cls'] == c).sum().item()
                     total_preds = (stat['target_cls'] == c).sum().item()
                     accuracy = correct_preds / total_preds if total_preds > 0 else 0
-                    self.accuracy.append(accuracy)
-                    
-            # Evaluate
-            if nl:
-                stat["tp"] = self._process_batch(predn, bbox, cls)
-                iou = box_iou(bbox, predn[:, :4])
-                accuracy = (iou.diagonal() > 0.5).float().mean().item()  # Example accuracy calculation
-                self.total_iou += iou.diagonal().mean().item()
-                self.total_accuracy += accuracy
-                self.batch_count += 1
-            if self.args.plots:
-                self.confusion_matrix.process_batch(predn, bbox, cls)
-            for k in self.stats.keys():
-                self.stats[k].append(stat[k])
+                    self.stats['accuracy'].append(accuracy)
 
             # Save
             if self.args.save_json:
@@ -201,6 +192,8 @@ class DetectionValidator(BaseValidator):
         """Set final values for metrics speed and confusion matrix."""
         self.metrics.speed = self.speed
         self.metrics.confusion_matrix = self.confusion_matrix
+        self.metrics.average_accuracy = np.mean(self.stats['accuracy'])
+        self.metrics.average_iou = np.mean(self.stats['iou'])
 
     def get_stats(self):
         """Returns metrics statistics and results dictionary."""
@@ -216,9 +209,8 @@ class DetectionValidator(BaseValidator):
         """Prints training/validation set metrics per class."""
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
-        LOGGER.info(f"Average IoU: {np.mean(self.iou):.3f}")
-        LOGGER.info(f"Average Accuracy: {np.mean(self.accuracy):.3f}")
-        # LOGGER.info(f"Average Accuracy: {self.total_accuracy / self.batch_count:.3f}")
+        LOGGER.info(f"Average Accuracy: {self.metrics.average_accuracy:.3f}")
+        LOGGER.info(f"Average IoU: {self.metrics.average_iou:.3f}")
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
