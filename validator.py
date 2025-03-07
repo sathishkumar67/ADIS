@@ -13,19 +13,9 @@ from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
 from ultralytics.utils.plotting import output_to_target, plot_images
 
-
 class DetectionValidator(BaseValidator):
     """
     A class extending the BaseValidator class for validation based on a detection model.
-
-    Example:
-        ```python
-        from ultralytics.models.yolo.detect import DetectionValidator
-
-        args = dict(model="yolo11n.pt", data="coco8.yaml")
-        validator = DetectionValidator(args=args)
-        validator()
-        ```
     """
 
     def __init__(self, dataloader=None, save_dir=None, pbar=None, args=None, _callbacks=None):
@@ -46,9 +36,6 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
-        self.iou_per_class = []
-        self.accuracy_per_class = []
-        self.batch_count = 0
 
     def preprocess(self, batch):
         """Preprocesses batch of images for YOLO training."""
@@ -75,10 +62,10 @@ class DetectionValidator(BaseValidator):
             isinstance(val, str)
             and "coco" in val
             and (val.endswith(f"{os.sep}val2017.txt") or val.endswith(f"{os.sep}test-dev2017.txt"))
-        )  # is COCO
-        self.is_lvis = isinstance(val, str) and "lvis" in val and not self.is_coco  # is LVIS
+        )
+        self.is_lvis = isinstance(val, str) and "lvis" in val and not self.is_coco
         self.class_map = converter.coco80_to_coco91_class() if self.is_coco else list(range(1, len(model.names) + 1))
-        self.args.save_json |= self.args.val and (self.is_coco or self.is_lvis) and not self.training  # run final val
+        self.args.save_json |= self.args.val and (self.is_coco or self.is_lvis) and not self.training
         self.names = model.names
         self.nc = len(model.names)
         self.end2end = getattr(model, "end2end", False)
@@ -87,11 +74,11 @@ class DetectionValidator(BaseValidator):
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
-        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
+        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[], iou_per_class={})
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
+        return ("%22s" + "%11s" * 8) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95", "IoU", "Acc")
 
     def postprocess(self, preds):
         """Apply Non-maximum suppression to prediction outputs."""
@@ -130,7 +117,7 @@ class DetectionValidator(BaseValidator):
         return predn
 
     def update_metrics(self, preds, batch):
-        """Metrics."""
+        """Update metrics with predictions and ground truth."""
         for si, pred in enumerate(preds):
             self.seen += 1
             npr = len(pred)
@@ -162,23 +149,23 @@ class DetectionValidator(BaseValidator):
             # Evaluate
             if nl:
                 stat["tp"] = self._process_batch(predn, bbox, cls)
+                # Calculate IoU per detection and store per class
+                iou = box_iou(bbox, predn[:, :4])  # [nl, npr]
+                matches = self.match_predictions(predn[:, 5], cls, iou)  # [npr, niou]
+                for cls_id in cls.unique():
+                    cls_mask = (cls == cls_id)
+                    pred_mask = (predn[:, 5] == cls_id)
+                    if cls_mask.sum() > 0 and pred_mask.sum() > 0:
+                        iou_cls = iou[cls_mask][:, pred_mask].max(dim=0)[0]  # Max IoU per prediction
+                        if cls_id.item() not in self.stats["iou_per_class"]:
+                            self.stats["iou_per_class"][cls_id.item()] = []
+                        self.stats["iou_per_class"][cls_id.item()].append(iou_cls)
+
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
                 self.stats[k].append(stat[k])
 
-            # # calculate iou per class
-            # iou_per_class = torch.zeros((nl, npr), device=self.device)
-            # for i, (t, p) in enumerate(zip(bbox, predn[:, :4])):
-            #     iou_per_class[i] = box_iou(t.unsqueeze(0), p.unsqueeze(0))
-            # self.iou_per_class.append(iou_per_class)
-            
-            # # calculate accuracy per class
-            # accuracy_per_class = []
-            # for i, (t, p) in enumerate(zip(cls, predn[:, 5])):
-            #     accuracy_per_class.append((t == p).sum() = t == p
-            # self.accuracy_per_class.append(accuracy_per_class)
-            
             # Save
             if self.args.save_json:
                 self.pred_to_json(predn, batch["im_file"][si])
@@ -197,18 +184,38 @@ class DetectionValidator(BaseValidator):
 
     def get_stats(self):
         """Returns metrics statistics and results dictionary."""
-        stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in self.stats.items()}  # to numpy
+        stats = {k: torch.cat(v, 0).cpu().numpy() if k != "iou_per_class" else v for k, v in self.stats.items()}
         self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=self.nc)
         self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=self.nc)
         stats.pop("target_img", None)
+
+        # Process IoU per class
+        self.iou_per_class = {}
+        if "iou_per_class" in stats:
+            for cls_id, iou_list in stats["iou_per_class"].items():
+                iou_tensor = torch.cat(iou_list) if iou_list else torch.tensor([], device=self.device)
+                self.iou_per_class[cls_id] = iou_tensor.mean().cpu().item() if len(iou_tensor) > 0 else 0.0
+            stats.pop("iou_per_class")
+
+        # Calculate accuracy per class (TP / (TP + FN))
+        self.acc_per_class = {}
         if len(stats):
             self.metrics.process(**stats, on_plot=self.on_plot)
+            tp = stats["tp"].sum(axis=1)  # Sum over IoU thresholds to get total TP per prediction
+            for cls_id in range(self.nc):
+                cls_mask = (stats["target_cls"] == cls_id)
+                tp_cls = tp[stats["pred_cls"] == cls_id].sum()  # Total TP for this class
+                gt_cls = cls_mask.sum()  # Total ground truth instances
+                self.acc_per_class[cls_id] = tp_cls / gt_cls if gt_cls > 0 else 0.0
+
         return self.metrics.results_dict
 
     def print_results(self):
-        """Prints training/validation set metrics per class."""
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
-        LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
+        """Prints training/validation set metrics per class with IoU and accuracy."""
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * 6  # Updated print format
+        LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results(), 
+                         np.mean(list(self.iou_per_class.values())), 
+                         np.mean(list(self.acc_per_class.values()))))
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
@@ -216,11 +223,9 @@ class DetectionValidator(BaseValidator):
         if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
                 LOGGER.info(
-                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
+                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i),
+                          self.iou_per_class.get(c, 0.0), self.acc_per_class.get(c, 0.0))
                 )
-                # print per-class iou and accuracy
-                # LOGGER.info(f"{'iou':>10s} {self.iou_per_class[i].mean():.3f}")
-                # LOGGER.info(f"{'accuracy':>10s} {self.accuracy_per_class[i].mean():.3f}")
 
         if self.args.plots:
             for normalize in True, False:
@@ -231,39 +236,18 @@ class DetectionValidator(BaseValidator):
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
         Return correct prediction matrix.
-
-        Args:
-            detections (torch.Tensor): Tensor of shape (N, 6) representing detections where each detection is
-                (x1, y1, x2, y2, conf, class).
-            gt_bboxes (torch.Tensor): Tensor of shape (M, 4) representing ground-truth bounding box coordinates. Each
-                bounding box is of the format: (x1, y1, x2, y2).
-            gt_cls (torch.Tensor): Tensor of shape (M,) representing target class indices.
-
-        Returns:
-            (torch.Tensor): Correct prediction matrix of shape (N, 10) for 10 IoU levels.
-
-        Note:
-            The function does not return any value directly usable for metrics calculation. Instead, it provides an
-            intermediate representation used for evaluating predictions against ground truth.
         """
         iou = box_iou(gt_bboxes, detections[:, :4])
         return self.match_predictions(detections[:, 5], gt_cls, iou)
 
     def build_dataset(self, img_path, mode="val", batch=None):
-        """
-        Build YOLO Dataset.
-
-        Args:
-            img_path (str): Path to the folder containing images.
-            mode (str): `train` mode or `val` mode, users are able to customize different augmentations for each mode.
-            batch (int, optional): Size of batches, this is for `rect`. Defaults to None.
-        """
+        """Build YOLO Dataset."""
         return build_yolo_dataset(self.args, img_path, batch, self.data, mode=mode, stride=self.stride)
 
     def get_dataloader(self, dataset_path, batch_size):
         """Construct and return dataloader."""
         dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
-        return build_dataloader(dataset, batch_size, self.args.workers, shuffle=False, rank=-1)  # return dataloader
+        return build_dataloader(dataset, batch_size, self.args.workers, shuffle=False, rank=-1)
 
     def plot_val_samples(self, batch, ni):
         """Plot validation image samples."""
@@ -287,10 +271,10 @@ class DetectionValidator(BaseValidator):
             fname=self.save_dir / f"val_batch{ni}_pred.jpg",
             names=self.names,
             on_plot=self.on_plot,
-        )  # pred
+        )
 
     def save_one_txt(self, predn, save_conf, shape, file):
-        """Save YOLO detections to a txt file in normalized coordinates in a specific format."""
+        """Save YOLO detections to a txt file in normalized coordinates."""
         from ultralytics.engine.results import Results
 
         Results(
@@ -304,8 +288,8 @@ class DetectionValidator(BaseValidator):
         """Serialize YOLO predictions to COCO json format."""
         stem = Path(filename).stem
         image_id = int(stem) if stem.isnumeric() else stem
-        box = ops.xyxy2xywh(predn[:, :4])  # xywh
-        box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+        box = ops.xyxy2xywh(predn[:, :4])
+        box[:, :2] -= box[:, 2:] / 2
         for p, b in zip(predn.tolist(), box.tolist()):
             self.jdict.append(
                 {
@@ -319,38 +303,37 @@ class DetectionValidator(BaseValidator):
     def eval_json(self, stats):
         """Evaluates YOLO output in JSON format and returns performance statistics."""
         if self.args.save_json and (self.is_coco or self.is_lvis) and len(self.jdict):
-            pred_json = self.save_dir / "predictions.json"  # predictions
+            pred_json = self.save_dir / "predictions.json"
             anno_json = (
                 self.data["path"]
                 / "annotations"
                 / ("instances_val2017.json" if self.is_coco else f"lvis_v1_{self.args.split}.json")
-            )  # annotations
+            )
             pkg = "pycocotools" if self.is_coco else "lvis"
             LOGGER.info(f"\nEvaluating {pkg} mAP using {pred_json} and {anno_json}...")
-            try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
+            try:
                 for x in pred_json, anno_json:
                     assert x.is_file(), f"{x} file not found"
                 check_requirements("pycocotools>=2.0.6" if self.is_coco else "lvis>=0.5.3")
                 if self.is_coco:
-                    from pycocotools.coco import COCO  # noqa
-                    from pycocotools.cocoeval import COCOeval  # noqa
+                    from pycocotools.coco import COCO
+                    from pycocotools.cocoeval import COCOeval
 
-                    anno = COCO(str(anno_json))  # init annotations api
-                    pred = anno.loadRes(str(pred_json))  # init predictions api (must pass string, not Path)
+                    anno = COCO(str(anno_json))
+                    pred = anno.loadRes(str(pred_json))
                     val = COCOeval(anno, pred, "bbox")
                 else:
                     from lvis import LVIS, LVISEval
 
-                    anno = LVIS(str(anno_json))  # init annotations api
-                    pred = anno._load_json(str(pred_json))  # init predictions api (must pass string, not Path)
+                    anno = LVIS(str(anno_json))
+                    pred = anno._load_json(str(pred_json))
                     val = LVISEval(anno, pred, "bbox")
-                val.params.imgIds = [int(Path(x).stem) for x in self.dataloader.dataset.im_files]  # images to eval
+                val.params.imgIds = [int(Path(x).stem) for x in self.dataloader.dataset.im_files]
                 val.evaluate()
                 val.accumulate()
                 val.summarize()
                 if self.is_lvis:
-                    val.print_results()  # explicitly call print_results
-                # update mAP50-95 and mAP50
+                    val.print_results()
                 stats[self.metrics.keys[-1]], stats[self.metrics.keys[-2]] = (
                     val.stats[:2] if self.is_coco else [val.results["AP50"], val.results["AP"]]
                 )
