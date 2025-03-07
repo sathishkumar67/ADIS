@@ -431,4 +431,4 @@ class AccuracyIoU:
     def print(self):
         """Print the calculated IoU and accuracy."""
         mean_iou, accuracy = self.get_metrics()
-        LOGGER.info(f"AVG IoU: {mean_iou:.3f} | AVG Accuracy: {accuracy:.3f}")
+        LOGGER.info(f"                      AVG IoU: {mean_iou:.3f} | AVG Accuracy: {accuracy:.3f}")
