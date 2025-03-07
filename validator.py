@@ -163,8 +163,6 @@ class DetectionValidator(BaseValidator):
 
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
-            for k in self.stats.keys():
-                self.stats[k].append(stat[k])
 
             # Save
             if self.args.save_json:
