@@ -46,10 +46,7 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
-        self.iou_cum = 0
-        self.accuracy_cum = 0
-        self.batch_count = 0
-        
+
     def preprocess(self, batch):
         """Preprocesses batch of images for YOLO training."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
@@ -163,12 +160,7 @@ class DetectionValidator(BaseValidator):
             # Evaluate
             if nl:
                 stat["tp"] = self._process_batch(predn, bbox, cls)
-                # accumulate iou scores
-                iou = box_iou(bbox, predn[:, :4])
-                accuracy = (iou.diagonal() > 0.5).float().mean().item()  # Example accuracy calculation
-                self.accuracy_cum += accuracy
-                self.iou_cum += iou.diagonal().mean().item()
-                self.batch_count += 1
+                # calculate IoU and accuracy
                 self.accuracy_iou.process_batch(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
@@ -205,10 +197,7 @@ class DetectionValidator(BaseValidator):
         """Prints training/validation set metrics per class."""
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
-        self.accuracy_iou.print()
-        # log iou score average
-        if self.batch_count > 0:
-            LOGGER.info(f"Average IoU: {self.iou_cum / self.batch_count:.2f} | Average accuracy: {self.accuracy_cum / self.batch_count:.2f}")
+        self.accuracy_iou.print() # print IoU and accuracy average
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
