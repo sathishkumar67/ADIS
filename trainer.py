@@ -49,7 +49,7 @@ from ultralytics.utils.torch_utils import (
     unset_deterministic,
     de_parallel
 )
-from ultralytics.models import yolo
+from validator import DetectionValidator
 from detector import DetectionModel
 
 
@@ -887,7 +887,7 @@ class DetectionTrainer(BaseTrainer):
     def get_validator(self):
         """Returns a DetectionValidator for YOLO model validation."""
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
-        return yolo.detect.DetectionValidator(
+        return DetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )
 
