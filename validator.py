@@ -36,6 +36,11 @@ class DetectionValidator(BaseValidator):
         self.is_coco = False
         self.is_lvis = False
         self.class_map = None
+        self.iou_cum = 0
+        self.batch_count = 0
+        self.accuracy_cum = 0
+        self.iou_mean = 0
+        self.accuracy_mean = 0
         self.args.task = "detect"
         self.metrics = DetMetrics(save_dir=self.save_dir)
         self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
@@ -88,7 +93,7 @@ class DetectionValidator(BaseValidator):
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
+        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)", "IOU", "Accuracy")
 
     def postprocess(self, preds):
         """Apply Non-maximum suppression to prediction outputs."""
@@ -229,6 +234,10 @@ class DetectionValidator(BaseValidator):
             intermediate representation used for evaluating predictions against ground truth.
         """
         iou = box_iou(gt_bboxes, detections[:, :4])
+        # self.iou_cum += iou
+        # self.batch_count += 1
+        # self.accuracy_cum
+        print(iou)
         return self.match_predictions(detections[:, 5], gt_cls, iou)
 
     def build_dataset(self, img_path, mode="val", batch=None):
