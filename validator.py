@@ -182,10 +182,54 @@ class DetectionValidator(BaseValidator):
 
     def get_stats(self):
         """Returns metrics statistics and results dictionary."""
-        stats = {k: torch.cat(v, 0).cpu().numpy() if k != "iou_per_class" else v for k, v in self.stats.items()}
+        # Convert stats to numpy, handling empty lists
+        stats = {}
+        for k, v in self.stats.items():
+            if k != "iou_per_class":
+                if v:  # Check if the list is non-empty
+                    stats[k] = torch.cat(v, 0).cpu().numpy()
+                else:
+                    # Handle empty case with an empty numpy array of appropriate shape
+                    if k == "tp":
+                        stats[k] = np.zeros((0, self.niou), dtype=bool)  # Shape: [N, niou]
+                    elif k in ["conf", "pred_cls", "target_cls"]:
+                        stats[k] = np.zeros(0, dtype=np.float32)  # Shape: [N]
+                    else:
+                        stats[k] = np.array([])  # Generic empty array
+            else:
+                stats[k] = v  # Keep iou_per_class as is
+
         self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=self.nc)
         self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=self.nc)
         stats.pop("target_img", None)
+
+        # Process IoU per class
+        self.iou_per_class = {}
+        if "iou_per_class" in stats:
+            for cls_id, iou_list in stats["iou_per_class"].items():
+                if iou_list:  # Check if iou_list is non-empty
+                    iou_tensor = torch.cat(iou_list)
+                    self.iou_per_class[cls_id] = iou_tensor.mean().cpu().item() if len(iou_tensor) > 0 else 0.0
+                else:
+                    self.iou_per_class[cls_id] = 0.0
+            stats.pop("iou_per_class")
+
+        # Calculate accuracy per class (TP / (TP + FN))
+        self.acc_per_class = {}
+        if len(stats) and len(stats["tp"]) > 0:  # Ensure stats has data
+            self.metrics.process(**stats, on_plot=self.on_plot)
+            tp = stats["tp"].sum(axis=1)  # Sum over IoU thresholds to get total TP per prediction
+            for cls_id in range(self.nc):
+                cls_mask = (stats["target_cls"] == cls_id)
+                tp_cls = tp[stats["pred_cls"] == cls_id].sum()  # Total TP for this class
+                gt_cls = cls_mask.sum()  # Total ground truth instances
+                self.acc_per_class[cls_id] = tp_cls / gt_cls if gt_cls > 0 else 0.0
+        else:
+            # If no predictions or ground truth, set accuracy to 0 for all classes
+            for cls_id in range(self.nc):
+                self.acc_per_class[cls_id] = 0.0
+
+        return self.metrics.results_dict
 
         # Process IoU per class
         self.iou_per_class = {}
