@@ -205,6 +205,7 @@ class DetectionValidator(BaseValidator):
         """Prints training/validation set metrics per class."""
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
+        self.accuracy_iou.print()
         # log iou score average
         if self.batch_count > 0:
             LOGGER.info(f"Average IoU: {self.iou_cum / self.batch_count:.2f} | Average accuracy: {self.accuracy_cum / self.batch_count:.2f}")
