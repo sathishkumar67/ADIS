@@ -206,7 +206,7 @@ class DetectionValidator(BaseValidator):
         if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
                 LOGGER.info(
-                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i), acc_per_class[c], iou_per_class[c])
+                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i), acc_per_class[i], iou_per_class[i])
                 )
 
         if self.args.plots:
