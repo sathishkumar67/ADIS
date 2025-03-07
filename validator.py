@@ -85,6 +85,7 @@ class DetectionValidator(BaseValidator):
         self.metrics.names = self.names
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
+        self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -168,6 +169,7 @@ class DetectionValidator(BaseValidator):
                 self.accuracy_cum += accuracy
                 self.iou_cum += iou.diagonal().mean().item()
                 self.batch_count += 1
+                self.accuracy_iou.process_batch(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -352,3 +354,94 @@ class DetectionValidator(BaseValidator):
             except Exception as e:
                 LOGGER.warning(f"{pkg} unable to run: {e}")
         return stats
+    
+
+class AccuracyIoU:
+    """
+    A simplified class for calculating IoU and accuracy for object detection tasks.
+
+    Attributes:
+        nc (int): Number of classes.
+        conf (float): Confidence threshold for detections.
+        iou_thres (float): IoU threshold for matching detections to ground truth.
+        total_iou (float): Running sum of IoU values.
+        total_tp (int): Running sum of true positives.
+        total_gt (int): Running sum of ground truth instances.
+    """
+
+    def __init__(self, nc, conf=0.25, iou_thres=0.45):
+        """Initialize attributes for IoU and accuracy calculation."""
+        self.nc = nc  # number of classes
+        self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
+        self.iou_thres = iou_thres  # IoU threshold
+        self.total_iou = 0.0  # Running total IoU
+        self.total_tp = 0  # Running total true positives
+        self.total_gt = 0  # Running total ground truth instances
+
+    def process_batch(self, detections, gt_bboxes, gt_cls):
+        """
+        Process a batch to update IoU and accuracy metrics.
+
+        Args:
+            detections (torch.Tensor[N, 6]): Detected boxes with (x1, y1, x2, y2, conf, class).
+            gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
+            gt_cls (torch.Tensor[M]): Ground truth class labels.
+        """
+        # Handle empty ground truth
+        if gt_cls.shape[0] == 0:
+            return
+
+        # Handle no detections
+        if detections is None:
+            self.total_gt += gt_cls.shape[0]  # All ground truth are false negatives
+            return
+
+        # Filter detections by confidence
+        detections = detections[detections[:, 4] > self.conf]
+        if detections.shape[0] == 0:
+            self.total_gt += gt_cls.shape[0]  # No detections, all ground truth are FN
+            return
+
+        # Compute IoU between ground truth and detections
+        iou = box_iou(gt_bboxes, detections[:, :4])  # [M, N] IoU matrix
+        gt_classes = gt_cls.int()
+        detection_classes = detections[:, 5].int()
+
+        # Find matches between detections and ground truth
+        x = torch.where(iou > self.iou_thres)
+        if x[0].shape[0]:  # If there are matches
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+            if x[0].shape[0] > 1:
+                # Sort by IoU in descending order and remove duplicates
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]  # Unique detection matches
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]  # Unique ground truth matches
+
+            m0, m1, iou_values = matches.transpose().astype(int)
+            matched_iou = matches[:, 2]  # IoU values for matched pairs
+            self.total_iou += matched_iou.sum()  # Sum IoU for matched detections
+            self.total_tp += len(matched_iou)  # Number of true positives
+            self.total_gt += gt_bboxes.shape[0]  # Total ground truth instances
+
+            # Log unmatched ground truth as FN (implicitly handled by total_gt - total_tp)
+        else:
+            self.total_gt += gt_bboxes.shape[0]  # No matches, all ground truth are FN
+
+    def get_metrics(self):
+        """
+        Calculate and return the average IoU and accuracy across all processed batches.
+
+        Returns:
+            tuple: (mean_iou, accuracy) where:
+                - mean_iou (float): Average IoU across all matched detections.
+                - accuracy (float): TP / (TP + FN) across all ground truth instances.
+        """
+        mean_iou = self.total_iou / self.total_tp if self.total_tp > 0 else 0.0
+        accuracy = self.total_tp / self.total_gt if self.total_gt > 0 else 0.0
+        return mean_iou, accuracy
+
+    def print(self):
+        """Print the calculated IoU and accuracy."""
+        mean_iou, accuracy = self.get_metrics()
+        LOGGER.info(f"Average IoU: {mean_iou:.3f} | Average Accuracy: {accuracy:.3f}")
