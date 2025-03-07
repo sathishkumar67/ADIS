@@ -46,10 +46,9 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
-        self.total_iou = 0
-        self.total_accuracy = 0
+        self.iou_cum = 0
         self.batch_count = 0
-
+        
     def preprocess(self, batch):
         """Preprocesses batch of images for YOLO training."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
@@ -162,18 +161,9 @@ class DetectionValidator(BaseValidator):
             # Evaluate
             if nl:
                 stat["tp"] = self._process_batch(predn, bbox, cls)
-                iou = box_iou(bbox, predn[:, :4])  # [nl, npr] IoU matrix
-                self.total_iou += iou.max(dim=1)[0].mean().item()  # Mean of max IoU per ground truth box
-
-                # Calculate accuracy: TP / (TP + FN)
-                tp = stat["tp"].sum(dim=1)  # [npr], True if prediction is TP at any IoU threshold
-                num_tp = tp.sum().item()  # Total true positives
-                num_gt = nl  # Total ground truth instances
-                accuracy = num_tp / num_gt if num_gt > 0 else 0.0  # Avoid division by zero
-                self.total_accuracy += accuracy
+                # accumulate iou scores
+                self.iou_cum += stat["tp"].sum(0)
                 self.batch_count += 1
-                self.batch_count += 1
-                
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -209,8 +199,9 @@ class DetectionValidator(BaseValidator):
         """Prints training/validation set metrics per class."""
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
-        # print average iou and accuracy
-        LOGGER.info(f"Average IoU: {self.total_iou / self.batch_count:.3f} | Average Accuracy: {self.total_accuracy / self.batch_count:.3f}")
+        # log iou score average
+        if self.batch_count > 0:
+            LOGGER.info(f"Average iou: {self.iou_cum / self.batch_count}")
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
@@ -220,7 +211,6 @@ class DetectionValidator(BaseValidator):
                 LOGGER.info(
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
-                LOGGER.info(f"Average IoU: {self.total_iou / self.batch_count:.3f} | Average Accuracy: {self.total_accuracy / self.batch_count:.3f}")
 
         if self.args.plots:
             for normalize in True, False:
