@@ -81,6 +81,7 @@ class DetectionValidator(BaseValidator):
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
+        self.accuracy_iou_per_class = AccuracyIoUPerClass(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -160,6 +161,7 @@ class DetectionValidator(BaseValidator):
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # calculate IoU and accuracy
                 self.accuracy_iou.process_batch(predn, bbox, cls)
+                self.accuracy_iou_per_class.process_batch(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -196,6 +198,7 @@ class DetectionValidator(BaseValidator):
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
         self.accuracy_iou.print() # print IoU and accuracy average
+        self.accuracy_iou_per_class.print(self.names) # print IoU and accuracy per class
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
@@ -432,3 +435,103 @@ class AccuracyIoU:
         """Print the calculated IoU and accuracy."""
         mean_iou, accuracy = self.get_metrics()
         LOGGER.info(f"                      AVG IoU: {mean_iou:.3f} | AVG Accuracy: {accuracy:.3f}")
+        
+
+class AccuracyIoUPerClass:
+    """
+    A class for calculating IoU and accuracy per class for object detection tasks.
+
+    Attributes:
+        nc (int): Number of classes.
+        conf (float): Confidence threshold for detections.
+        iou_thres (float): IoU threshold for matching detections to ground truth.
+        class_iou (dict): Dictionary to store total IoU sums per class.
+        class_tp (dict): Dictionary to store true positive counts per class.
+        class_gt (dict): Dictionary to store ground truth counts per class.
+    """
+
+    def __init__(self, nc, conf=0.25, iou_thres=0.45):
+        """Initialize attributes for per-class IoU and accuracy calculation."""
+        self.nc = nc  # number of classes
+        self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
+        self.iou_thres = iou_thres  # IoU threshold
+        self.class_iou = {i: 0.0 for i in range(nc)}  # Total IoU per class
+        self.class_tp = {i: 0 for i in range(nc)}    # True positives per class
+        self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
+
+    def process_batch(self, detections, gt_bboxes, gt_cls):
+        """
+        Process a batch to update IoU and accuracy metrics per class.
+
+        Args:
+            detections (torch.Tensor[N, 6]): Detected boxes with (x1, y1, x2, y2, conf, class).
+            gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
+            gt_cls (torch.Tensor[M]): Ground truth class labels.
+        """
+        # Handle empty ground truth
+        if gt_cls.shape[0] == 0:
+            return
+
+        # Update ground truth counts per class
+        gt_classes = gt_cls.int().cpu().numpy()
+        for gc in gt_classes:
+            self.class_gt[gc] += 1
+
+        # Handle no detections
+        if detections is None:
+            return
+
+        # Filter detections by confidence
+        detections = detections[detections[:, 4] > self.conf]
+        if detections.shape[0] == 0:
+            return
+
+        # Compute IoU between ground truth and detections
+        iou = box_iou(gt_bboxes, detections[:, :4])  # [M, N] IoU matrix
+        detection_classes = detections[:, 5].int().cpu().numpy()
+
+        # Find matches between detections and ground truth
+        x = torch.where(iou > self.iou_thres)
+        if x[0].shape[0]:  # If there are matches
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+            if x[0].shape[0] > 1:
+                # Sort by IoU in descending order and remove duplicates
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]  # Unique detection matches
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]  # Unique ground truth matches
+
+            m0, m1, _ = matches.transpose().astype(int)  # m0: gt indices, m1: detection indices
+            for i, gc in enumerate(gt_classes):
+                j = m0 == i
+                if sum(j) == 1:  # If this ground truth box is matched
+                    dc = detection_classes[m1[j][0]]  # Predicted class
+                    if dc == gc:  # Correct class prediction
+                        iou_value = matches[j, 2][0]  # IoU for this match
+                        self.class_iou[gc] += iou_value
+                        self.class_tp[gc] += 1
+
+    def get_metrics(self):
+        """
+        Calculate and return IoU and accuracy per class.
+
+        Returns:
+            tuple: (iou_per_class, acc_per_class) where:
+                - iou_per_class (dict): Average IoU for each class.
+                - acc_per_class (dict): Accuracy (TP / GT) for each class.
+        """
+        iou_per_class = {}
+        acc_per_class = {}
+        for cls in range(self.nc):
+            iou_per_class[cls] = self.class_iou[cls] / self.class_tp[cls] if self.class_tp[cls] > 0 else 0.0
+            acc_per_class[cls] = self.class_tp[cls] / self.class_gt[cls] if self.class_gt[cls] > 0 else 0.0
+        return iou_per_class, acc_per_class
+
+    def print(self, names=None):
+        """Print IoU and accuracy for each class."""
+        iou_per_class, acc_per_class = self.get_metrics()
+        if names is None:
+            names = {i: f"Class_{i}" for i in range(self.nc)}
+        LOGGER.info("Per-class IoU and Accuracy:")
+        for cls in range(self.nc):
+            LOGGER.info(f"{names[cls]:<20} | IoU: {iou_per_class[cls]:.3f} | Accuracy: {acc_per_class[cls]:.3f}")
