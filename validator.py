@@ -46,6 +46,9 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
+        self.iou_per_class = []
+        self.accuracy_per_class = []
+        self.batch_count = 0
 
     def preprocess(self, batch):
         """Preprocesses batch of images for YOLO training."""
@@ -84,7 +87,7 @@ class DetectionValidator(BaseValidator):
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
-        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[], accuracy=[], iou=[])
+        self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
@@ -164,19 +167,18 @@ class DetectionValidator(BaseValidator):
             for k in self.stats.keys():
                 self.stats[k].append(stat[k])
 
-            # Calculate IoU for each prediction
-            for i, p in enumerate(pred):
-                iou = box_iou(bbox, p[:4].unsqueeze(0))  # Calculate IoU
-                self.stats['iou'].append(iou.max().item())  # Save maximum IoU
-
-            # Calculate accuracy for each class
-            for c in self.names:
-                if c in self.stats['target_cls']:
-                    correct_preds = (stat['pred_cls'] == c).sum().item()
-                    total_preds = (stat['target_cls'] == c).sum().item()
-                    accuracy = correct_preds / total_preds if total_preds > 0 else 0
-                    self.stats['accuracy'].append(accuracy)
-
+            # calculate iou per class
+            iou_per_class = torch.zeros((nl, npr), device=self.device)
+            for i, (t, p) in enumerate(zip(bbox, predn[:, :4])):
+                iou_per_class[i] = box_iou(t.unsqueeze(0), p.unsqueeze(0))
+            self.iou_per_class.append(iou_per_class)
+            
+            # calculate accuracy per class
+            accuracy_per_class = torch.zeros((nl, npr), device=self.device)
+            for i, (t, p) in enumerate(zip(cls, predn[:, 5])):
+                accuracy_per_class[i] = t == p
+            self.accuracy_per_class.append(accuracy_per_class)
+            
             # Save
             if self.args.save_json:
                 self.pred_to_json(predn, batch["im_file"][si])
@@ -192,8 +194,6 @@ class DetectionValidator(BaseValidator):
         """Set final values for metrics speed and confusion matrix."""
         self.metrics.speed = self.speed
         self.metrics.confusion_matrix = self.confusion_matrix
-        self.metrics.average_accuracy = np.mean(self.stats['accuracy'])
-        self.metrics.average_iou = np.mean(self.stats['iou'])
 
     def get_stats(self):
         """Returns metrics statistics and results dictionary."""
@@ -209,8 +209,6 @@ class DetectionValidator(BaseValidator):
         """Prints training/validation set metrics per class."""
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
-        LOGGER.info(f"Average Accuracy: {self.metrics.average_accuracy:.3f}")
-        LOGGER.info(f"Average IoU: {self.metrics.average_iou:.3f}")
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
@@ -220,6 +218,9 @@ class DetectionValidator(BaseValidator):
                 LOGGER.info(
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
+                # print per-class iou and accuracy
+                LOGGER.info(f"{'iou':>10s} {self.iou_per_class[i].mean():.3f}")
+                LOGGER.info(f"{'accuracy':>10s} {self.accuracy_per_class[i].mean():.3f}")
 
         if self.args.plots:
             for normalize in True, False:
