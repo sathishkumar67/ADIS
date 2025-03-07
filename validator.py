@@ -205,8 +205,8 @@ class DetectionValidator(BaseValidator):
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
         # log iou score average
         if self.batch_count > 0:
-            LOGGER.info(f"Average iou: {self.iou_cum / self.batch_count}")
-            LOGGER.info(f"Average accuracy: {self.accuracy_cum / self.batch_count}")
+            LOGGER.info(f"Average IoU: {self.iou_cum / self.batch_count:.2f}")
+            LOGGER.info(f"Average accuracy: {self.accuracy_cum / self.batch_count:.2f}")
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
