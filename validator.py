@@ -220,6 +220,11 @@ class DetectionValidator(BaseValidator):
                 LOGGER.info(
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
+                # Print accuracy and IoU for each class
+                class_accuracy = np.mean([acc for acc, cls in zip(self.stats['accuracy'], self.stats['target_cls']) if cls == c])
+                class_iou = np.mean([iou for iou, cls in zip(self.stats['iou'], self.stats['target_cls']) if cls == c])
+                LOGGER.info(f"Class {self.names[c]} Accuracy: {class_accuracy:.3f}")
+                LOGGER.info(f"Class {self.names[c]} IoU: {class_iou:.3f}")
 
         if self.args.plots:
             for normalize in True, False:
