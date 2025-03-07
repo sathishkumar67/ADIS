@@ -172,6 +172,12 @@ class DetectionValidator(BaseValidator):
             # Save
             if self.args.save_json:
                 self.pred_to_json(predn, batch["im_file"][si])
+                iou = box_iou(bbox, predn[:, :4])
+                accuracy = (iou.diagonal() > 0.5).float().mean().item()  # Example accuracy calculation
+                self.total_iou += iou.diagonal().mean().item()
+                self.total_accuracy += accuracy
+                self.batch_count += 1
+                
             if self.args.save_txt:
                 self.save_one_txt(
                     predn,
@@ -214,6 +220,12 @@ class DetectionValidator(BaseValidator):
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
                 )
+                
+        if self.batch_count > 0:
+            avg_iou = self.total_iou / self.batch_count
+            avg_accuracy = self.total_accuracy / self.batch_count
+            LOGGER.info(f"Average IoU: {avg_iou:.4f}")
+            LOGGER.info(f"Average Accuracy: {avg_accuracy:.4f}")
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
@@ -234,10 +246,6 @@ class DetectionValidator(BaseValidator):
             intermediate representation used for evaluating predictions against ground truth.
         """
         iou = box_iou(gt_bboxes, detections[:, :4])
-        # self.iou_cum += iou
-        # self.batch_count += 1
-        # self.accuracy_cum
-        print(iou)
         return self.match_predictions(detections[:, 5], gt_cls, iou)
 
     def build_dataset(self, img_path, mode="val", batch=None):
