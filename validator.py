@@ -47,6 +47,7 @@ class DetectionValidator(BaseValidator):
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
         self.iou_cum = 0
+        self.accuracy_cum = 0
         self.batch_count = 0
         
     def preprocess(self, batch):
@@ -163,6 +164,8 @@ class DetectionValidator(BaseValidator):
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # accumulate iou scores
                 iou = box_iou(bbox, predn[:, :4])
+                accuracy = (iou.diagonal() > 0.5).float().mean().item()  # Example accuracy calculation
+                self.accuracy_cum += accuracy
                 self.iou_cum += iou.diagonal().mean().item()
                 self.batch_count += 1
             if self.args.plots:
@@ -203,6 +206,7 @@ class DetectionValidator(BaseValidator):
         # log iou score average
         if self.batch_count > 0:
             LOGGER.info(f"Average iou: {self.iou_cum / self.batch_count}")
+            LOGGER.info(f"Average accuracy: {self.accuracy_cum / self.batch_count}")
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(f"WARNING ⚠️ no labels found in {self.args.task} set, can not compute metrics without labels")
 
