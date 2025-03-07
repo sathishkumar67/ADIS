@@ -162,7 +162,8 @@ class DetectionValidator(BaseValidator):
             if nl:
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # accumulate iou scores
-                self.iou_cum += stat["tp"].sum(0)
+                iou = box_iou(bbox, predn[:, :4])
+                self.iou_cum += iou.diagonal().mean().item()
                 self.batch_count += 1
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
