@@ -3,75 +3,17 @@ import math
 import copy
 import torch
 import torch.nn as nn
-from ultralytics.nn.modules import (
-    AIFI,
-    C1,
-    C2,
-    C2PSA,
-    C3,
-    C3TR,
-    ELAN1,
-    OBB,
-    PSA,
-    SPP,
-    SPPELAN,
-    SPPF,
-    A2C2f,
-    AConv,
-    ADown,
-    Bottleneck,
-    BottleneckCSP,
-    C2f,
-    C2fAttn,
-    C2fCIB,
-    C2fPSA,
-    C3Ghost,
-    C3k2,
-    C3x,
-    CBFuse,
-    CBLinear,
-    Classify,
-    Concat,
-    Conv,
-    Conv2,
-    ConvTranspose,
-    Detect,
-    DWConv,
-    DWConvTranspose2d,
-    Focus,
-    GhostBottleneck,
-    GhostConv,
-    HGBlock,
-    HGStem,
-    ImagePoolingAttn,
-    Index,
-    Pose,
-    RepC3,
-    RepConv,
-    RepNCSPELAN4,
-    RepVGGDW,
-    ResNetLayer,
-    RTDETRDecoder,
-    SCDown,
-    Segment,
-    TorchVision,
-    WorldDetect,
-    v10Detect,
-)
 from utils import *
 
 
 class Conv(nn.Module):
     """Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)."""
-
-    default_act = nn.SiLU()  # default activation
-
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         """Initialize Conv layer with given arguments including activation."""
         super().__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
-        self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
+        self.act = nn.SiLU()
 
     def forward(self, x):
         """Apply convolution, batch normalization and activation to input tensor."""
@@ -150,7 +92,6 @@ class C3k(C3):
         """Initializes the C3k module with specified channels, number of layers, and configurations."""
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
-        # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
 
 
