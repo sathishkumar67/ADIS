@@ -166,7 +166,7 @@ class DetectionModel(nn.Module):
             return self.loss(x, *args, **kwargs)
         return self.predict(x, *args, **kwargs)
 
-    def predict(self, x, profile=False, visualize=False, embed=None):
+    def predict(self, x, profile=False, visualize=False, embed=None, augment=False):
         """
         Perform a forward pass through the network.
 
