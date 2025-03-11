@@ -35,12 +35,6 @@ from validator import DetectionValidator
 
 class YOLO11Model(nn.Module):
     """
-    A base class for implementing YOLO models, unifying APIs across different model types.
-
-    This class provides a common interface for various operations related to YOLO models, such as training,
-    validation, prediction, exporting, and benchmarking. It handles different types of models, including those
-    loaded from local files, Ultralytics HUB, or Triton Server.
-
     Attributes:
         callbacks (Dict): A dictionary of callback functions for various events during model operations.
         predictor (BasePredictor): The predictor object used for making predictions.
@@ -1139,12 +1133,12 @@ class YOLO11Model(nn.Module):
             classes supported by the Ultralytics framework. The docstring provides a general
             description of the expected behavior and structure.
         """
-        return {
+        return {"detect": {
                 "model": DetectionModel,
                 "trainer": DetectionTrainer,
                 "validator": DetectionValidator,
                 "predictor": DetectionPredictor,
-            }
+            }}
 
     def eval(self):
         """
