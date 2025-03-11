@@ -2,7 +2,9 @@ from __future__ import annotations
 import torch
 import zipfile
 import os
+import math
 from tqdm import tqdm
+
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
     """Pad to 'same' shape outputs."""
@@ -36,6 +38,21 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
         wh = x2y2 - x1y1
         return torch.cat((c_xy, wh), dim)  # xywh bbox
     return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
+def make_divisible(x, divisor):
+    """
+    Returns the nearest number that is divisible by the given divisor.
+
+    Args:
+        x (int): The number to make divisible.
+        divisor (int | torch.Tensor): The divisor.
+
+    Returns:
+        (int): The nearest number divisible by the divisor.
+    """
+    if isinstance(divisor, torch.Tensor):
+        divisor = int(divisor.max())  # to int
+    return math.ceil(x / divisor) * divisor
 
 def unzip_file(zip_path: str, target_dir: str) -> None:
     """
