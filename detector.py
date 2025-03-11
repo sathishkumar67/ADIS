@@ -1,9 +1,9 @@
 from copy import deepcopy
+import contextlib
 import torch
 import torch.nn as nn
 from ultralytics.utils import LOGGER
 from ultralytics.utils.loss import v8DetectionLoss
-
 from ultralytics.utils.plotting import feature_visualization
 from ultralytics.utils.torch_utils import (
     fuse_conv_and_bn,
@@ -12,8 +12,8 @@ from ultralytics.utils.torch_utils import (
     model_info,
     time_sync,
 )
-from ultralytics.nn.tasks import *
-# from blocks import *
+from ultralytics.nn.tasks import yaml_model_load, TorchVision, Index
+from blocks import *
 try:
     import thop
 except ImportError:
@@ -117,7 +117,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
 
 class DetectionModel(nn.Module):
     """YOLO detection model."""
-
     def __init__(self, cfg="yolo11n.yaml", ch=3, nc=None, verbose=True):  # model, input channels, number of classes
         """Initialize the YOLO detection model with the given config and parameters."""
         super().__init__()
@@ -135,7 +134,6 @@ class DetectionModel(nn.Module):
         if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
             s = 256  # 2x min stride
             m.inplace = self.inplace
-
             def _forward(x):
                 """Performs a forward pass through the model, handling different Detect subclass types accordingly."""
                 return self.forward(x)
@@ -149,10 +147,6 @@ class DetectionModel(nn.Module):
         if verbose:
             self.info()
             LOGGER.info("")
-    
-    def init_criterion(self):
-        """Initialize the loss criterion for the DetectionModel."""
-        return v8DetectionLoss(self)
     
     def forward(self, x, *args, **kwargs):
         """
@@ -301,3 +295,7 @@ class DetectionModel(nn.Module):
 
         preds = self.forward(batch["img"]) if preds is None else preds
         return self.criterion(preds, batch)
+    
+    def init_criterion(self):
+        """Initialize the loss criterion for the DetectionModel."""
+        return v8DetectionLoss(self)
