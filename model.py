@@ -1,3 +1,4 @@
+from __future__ import annotations
 import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Union
@@ -5,6 +6,9 @@ from typing import Any, Dict, List, Union
 import numpy as np
 import torch
 from PIL import Image
+
+import torch
+import torch.nn as nn
 
 from ultralytics.cfg import TASK2DATA, get_cfg, get_save_dir
 from ultralytics.engine.results import Results
@@ -22,14 +26,14 @@ from ultralytics.utils import (
     emojis,
     yaml_load,
 )
-from ultralytics.models import yolo
+from ultralytics.models.yolo.detect import DetectionPredictor
 from detector import DetectionModel
 from trainer import DetectionTrainer
 from validator import DetectionValidator
 
 
 
-class Model(torch.nn.Module):
+class YOLO11Model(nn.Module):
     """
     A base class for implementing YOLO models, unifying APIs across different model types.
 
@@ -81,12 +85,11 @@ class Model(torch.nn.Module):
         >>> metrics = model.val()
         >>> model.export(format="onnx")
     """
-
     def __init__(
         self,
         model: Union[str, Path] = "yolo11n.pt",
-        task: str = None,
-        verbose: bool = False,
+        task: str = "detect",
+        verbose: bool = True,
     ) -> None:
         """
         Initializes a new instance of the YOLO model class.
@@ -332,7 +335,7 @@ class Model(torch.nn.Module):
                 f"argument directly in your inference command, i.e. 'model.predict(source=..., device=0)'"
             )
 
-    def reset_weights(self) -> "Model":
+    def reset_weights(self) -> YOLO11Model:
         """
         Resets the model's weights to their initial state.
 
@@ -358,7 +361,7 @@ class Model(torch.nn.Module):
             p.requires_grad = True
         return self
 
-    def load(self, weights: Union[str, Path] = "yolo11n.pt") -> "Model":
+    def load(self, weights: Union[str, Path] = "yolo11n.pt") -> YOLO11Model:
         """
         Loads parameters from the specified weights file into the model.
 
@@ -863,7 +866,7 @@ class Model(torch.nn.Module):
             args = {**self.overrides, **custom, **kwargs, "mode": "train"}  # highest priority args on the right
             return Tuner(args=args, _callbacks=self.callbacks)(model=self, iterations=iterations)
 
-    def _apply(self, fn) -> "Model":
+    def _apply(self, fn) -> YOLO11Model:
         """
         Applies a function to model tensors that are not parameters or registered buffers.
 
@@ -1136,7 +1139,12 @@ class Model(torch.nn.Module):
             classes supported by the Ultralytics framework. The docstring provides a general
             description of the expected behavior and structure.
         """
-        raise NotImplementedError("Please provide task map for your model!")
+        return {
+                "model": DetectionModel,
+                "trainer": DetectionTrainer,
+                "validator": DetectionValidator,
+                "predictor": DetectionPredictor,
+            }
 
     def eval(self):
         """
@@ -1178,23 +1186,3 @@ class Model(torch.nn.Module):
             >>> print(model.task)
         """
         return self._modules["model"] if name == "model" else getattr(self.model, name)
-    
-
-class YOLO(Model):
-    """YOLO (You Only Look Once) object detection model."""
-
-    def __init__(self, model="yolo11n.pt", task="detect", verbose=False):
-        """Initialize YOLO model, switching to YOLOWorld if model filename contains '-world'."""
-        super().__init__(model=model, task=task, verbose=verbose)
-
-    @property
-    def task_map(self):
-        """Map head to model, trainer, validator, and predictor classes."""
-        return {
-            "detect": {
-                "model": DetectionModel,
-                "trainer": DetectionTrainer,
-                "validator": DetectionValidator,
-                "predictor": yolo.detect.DetectionPredictor,
-            }
-        }
