@@ -368,7 +368,7 @@ class Detect(nn.Module):
         return torch.cat((dbox, cls.sigmoid()), 1)
 
     def decode_bboxes(self, bboxes, anchors, xywh=True):
-        """Decode bounding boxes."""
+        """Decode bounding boxes from grid coordinates and anchor widths/heights."""
         return dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
 
     @staticmethod
