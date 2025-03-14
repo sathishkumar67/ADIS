@@ -35,6 +35,7 @@ class DetectionValidator(BaseValidator):
         self.class_map = None
         self.args.task = "detect"
         self.metrics = DetMetrics(save_dir=self.save_dir)
+        # self.roc_metrics = ROCMetrics(nc=len(self.names), save_dir=self.save_dir, names=self.names)
         self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
         self.lb = []  # for autolabelling
@@ -190,6 +191,7 @@ class DetectionValidator(BaseValidator):
         stats.pop("target_img", None)
         if len(stats):
             self.metrics.process(**stats, on_plot=self.on_plot)
+            # self.roc_metrics.process(**stats, on_plot=self.on_plot)
         return self.metrics.results_dict
 
     def print_results(self):
@@ -533,3 +535,178 @@ class AccuracyIoUPerClass:
         LOGGER.info("Per-class IoU and Accuracy:")
         for cls in range(self.nc):
             LOGGER.info(f"{names[cls]:<20} | IoU: {iou_per_class[cls]:.3f} | Accuracy: {acc_per_class[cls]:.3f}")
+
+# import numpy as np
+# from pathlib import Path
+# import matplotlib.pyplot as plt
+
+# class ROCMetrics:
+#     """
+#     A class for calculating True Positive Rate (TPR), False Positive Rate (FPR), and Area Under the ROC Curve (AUROC)
+#     for object detection tasks, modeled after the ConfusionMatrix class in Ultralytics.
+
+#     Attributes:
+#         nc (int): Number of classes.
+#         conf (float): Confidence threshold for detections.
+#         iou_thres (float): IoU threshold for determining true positives.
+#         data (dict): Dictionary storing confidence scores and labels (1 for TP, 0 for FP) per class.
+#     """
+
+#     def __init__(self, nc, conf=0.25, iou_thres=0.45, save_dir=".", names={}):
+#         """
+#         Initialize the ROCMetrics class.
+
+#         Args:
+#             nc (int): Number of classes.
+#             conf (float, optional): Confidence threshold for detections. Defaults to 0.25.
+#             iou_thres (float, optional): IoU threshold for matching detections to ground truths. Defaults to 0.45.
+#         """
+#         self.nc = nc
+#         self.conf = conf
+#         self.iou_thres = iou_thres
+#         self.data = {c: [] for c in range(nc)}  # Stores (confidence, label) pairs for each class
+#         self.save_dir = Path(save_dir)
+#         self.names = names
+
+#     def process(self, tp, conf, pred_cls, target_cls, on_plot=None):
+#         """
+#         Process detection results to collect data for ROC computation.
+
+#         Args:
+#             tp (np.ndarray): Binary array indicating true positives, shape (num_dets,).
+#             conf (np.ndarray): Confidence scores, shape (num_dets,).
+#             pred_cls (np.ndarray): Predicted classes, shape (num_dets,).
+#         """
+#         # Ensure inputs are NumPy arrays and convert to appropriate types
+#         tp = np.asarray(tp, dtype=int)
+#         conf = np.asarray(conf, dtype=float)
+#         pred_cls = np.asarray(pred_cls, dtype=int)
+
+#         # Filter detections by confidence threshold
+#         mask = conf > self.conf
+#         tp, conf, pred_cls = tp[mask], conf[mask], pred_cls[mask]
+
+#         # Collect confidence scores and labels (1 for TP, 0 for FP) for each class
+#         for t, c, cls in zip(tp, conf, pred_cls):
+#             self.data[cls].append((c, t))
+
+#     def compute_roc(self, c):
+#         """
+#         Compute the ROC curve and AUROC for a specific class.
+
+#         Args:
+#             c (int): Class index.
+
+#         Returns:
+#             tuple: (fpr, tpr, auroc)
+#                 - fpr (np.ndarray): False Positive Rates.
+#                 - tpr (np.ndarray): True Positive Rates.
+#                 - auroc (float): Area Under the ROC Curve.
+#         """
+#         if not self.data[c]:
+#             # Return default values if no data for the class
+#             return np.array([0, 1]), np.array([0, 1]), 0.0
+
+#         # Convert list of (confidence, label) to NumPy array
+#         conf_labels = np.array(self.data[c], dtype=[('conf', float), ('label', int)])
+        
+#         # Sort by confidence in descending order
+#         sorted_idx = np.argsort(-conf_labels['conf'])
+#         conf_labels = conf_labels[sorted_idx]
+
+#         # Cumulative sums for TPs and FPs
+#         tp_cumsum = np.cumsum(conf_labels['label'])
+#         fp_cumsum = np.cumsum(1 - conf_labels['label'])
+
+#         total_p = float(tp_cumsum[-1]) if len(tp_cumsum) > 0 else 0.0
+#         total_n = float(fp_cumsum[-1]) if len(fp_cumsum) > 0 else 0.0
+
+#         if total_p == 0 or total_n == 0:
+#             # Return default values if no positives or negatives
+#             return np.array([0, 1]), np.array([0, 1]), 0.0
+
+#         # Calculate TPR and FPR
+#         tpr = tp_cumsum / total_p
+#         fpr = fp_cumsum / total_n
+
+#         # Add endpoints (0,0) and (1,1) for complete ROC curve
+#         fpr = np.concatenate([[0], fpr, [1]])
+#         tpr = np.concatenate([[0], tpr, [1]])
+
+#         # Compute AUROC using the trapezoidal rule
+#         auroc = np.trapz(tpr, fpr)
+
+#         return fpr, tpr, auroc
+
+#     def get_auroc(self):
+#         """
+#         Get the AUROC for each class.
+
+#         Returns:
+#             list: List of AUROC values for each class.
+#         """
+#         auroc_per_class = []
+#         for c in range(self.nc):
+#             _, _, auroc = self.compute_roc(c)
+#             auroc_per_class.append(auroc)
+#         return auroc_per_class
+
+#     @property
+#     def mean_auroc(self):
+#         """
+#         Compute the mean AUROC across all classes.
+
+#         Returns:
+#             float: Mean AUROC value.
+#         """
+#         auroc_values = self.get_auroc()
+#         return np.mean(auroc_values) if auroc_values else 0.0
+
+#     def plot(self, on_plot=None):
+#         """
+#         Plot ROC curves for each class and save the figure.
+
+#         Args:
+#             save_dir (Path, optional): Directory to save the plot. Defaults to current directory.
+#             names (dict, optional): Dictionary mapping class indices to names. Defaults to empty dict.
+#             on_plot (callable, optional): Callback function to handle plot file path. Defaults to None.
+#         """
+#         fig, ax = plt.subplots(figsize=(8, 6), tight_layout=True)
+#         for c in range(self.nc):
+#             fpr, tpr, auroc = self.compute_roc(c)
+#             label = self.names.get(c, f"Class {c}")
+#             ax.plot(fpr, tpr, label=f"{label} AUROC={auroc:.3f}")
+        
+#         # Plot diagonal line (random classifier)
+#         ax.plot([0, 1], [0, 1], "k--", label="Random")
+#         ax.set_xlabel("False Positive Rate")
+#         ax.set_ylabel("True Positive Rate")
+#         ax.set_title("ROC Curve")
+#         ax.set_xlim(0, 1)
+#         ax.set_ylim(0, 1)
+#         ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+        
+#         # Save the plot
+#         plot_fname = self.save_dir / "roc_curve.png"
+#         fig.savefig(plot_fname, dpi=250)
+#         plt.close(fig)
+        
+#         if on_plot:
+#             on_plot(plot_fname)
+
+#     def print(self):
+#         """
+#         Print AUROC values for each class.
+
+#         Args:
+#             names (dict, optional): Dictionary mapping class indices to names. Defaults to empty dict.
+#         """
+#         from ultralytics.utils import LOGGER
+#         auroc_per_class = self.get_auroc()
+#         for c, auroc in enumerate(auroc_per_class):
+#             label = self.names.get(c, f"Class {c}")
+#             LOGGER.info(f"{label}: AUROC = {auroc:.4f}")
+#         LOGGER.info(f"Mean AUROC: {self.mean_auroc:.4f}")
+        
+        
+#         save_dir, names
