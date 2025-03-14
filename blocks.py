@@ -135,7 +135,7 @@ sppf_cuda = load(
     verbose=True
 )
 
-class SPPFCUDA(nn.Module):
+class SPPF(nn.Module):
     def __init__(self, c1, c2, k=5):
         super().__init__()
         c_ = c1 // 2
