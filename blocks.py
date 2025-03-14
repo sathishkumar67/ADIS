@@ -104,89 +104,89 @@ class C3k2(C2f):
             C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
         )
 
-# class SPPF(nn.Module):
-#     """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
-#     def __init__(self, c1, c2, k=5):
-#         """
-#         Initializes the SPPF layer with given input/output channels and kernel size.
-
-#         This module is equivalent to SPP(k=(5, 9, 13)).
-#         """
-#         super().__init__()
-#         c_ = c1 // 2  # hidden channels
-#         self.cv1 = Conv(c1, c_, 1, 1)
-#         self.cv2 = Conv(c_ * 4, c2, 1, 1)
-#         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-
-#     def forward(self, x):
-#         """Forward pass through Ghost Convolution block."""
-#         y = [self.cv1(x)]
-#         y.extend(self.m(y[-1]) for _ in range(3))
-#         return self.cv2(torch.cat(y, 1))
-
-import torch
-import torch.nn as nn
-from torch.utils.cpp_extension import load
-
-# Load CUDA kernel
-sppf_cuda = load(
-    name="sppf_cuda",
-    sources=["sppf_kernel.cu"],
-    verbose=True
-)
-
 class SPPF(nn.Module):
+    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
     def __init__(self, c1, c2, k=5):
+        """
+        Initializes the SPPF layer with given input/output channels and kernel size.
+
+        This module is equivalent to SPP(k=(5, 9, 13)).
+        """
         super().__init__()
-        c_ = c1 // 2
+        c_ = c1 // 2  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * 4, c2, 1, 1)
-        self.k = k
-        self.pad = k // 2
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Query GPU properties
-        self.adapt_kernel_config()
-
-    def adapt_kernel_config(self):
-        props = torch.cuda.get_device_properties(0)
-        self.sm_count = props.multi_processor_count
-        self.max_threads = props.max_threads_per_block
-        self.shared_mem = props.shared_memory_per_block
-        self.compute_cap = props.major * 10 + props.minor
-        # Adjust tile size based on shared memory (e.g., fit 32x32 float tile)
-        self.tile_size = 32  # Could be tuned further
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 
     def forward(self, x):
-        B, C_in, H, W = x.shape
-        C_ = C_in // 2
+        """Forward pass through Ghost Convolution block."""
+        y = [self.cv1(x)]
+        y.extend(self.m(y[-1]) for _ in range(3))
+        return self.cv2(torch.cat(y, 1))
 
-        # Apply cv1
-        y0 = self.cv1(x)  # [B, c_, H, W]
+# import torch
+# import torch.nn as nn
+# from torch.utils.cpp_extension import load
 
-        # Prepare buffers
-        pool1 = torch.zeros_like(y0)
-        pool2 = torch.zeros_like(y0)
-        pool3 = torch.zeros_like(y0)
+# # Load CUDA kernel
+# sppf_cuda = load(
+#     name="sppf_cuda",
+#     sources=["sppf_kernel.cu"],
+#     verbose=True
+# )
 
-        # Kernel launch parameters
-        block = (min(self.tile_size, self.max_threads // self.tile_size), 
-                 self.tile_size, 1)
-        grid_x = (W + self.tile_size - self.k) // (self.tile_size - self.k + 1) + 1
-        grid_y = (H + self.tile_size - self.k) // (self.tile_size - self.k + 1) + 1
-        grid = (grid_x, grid_y, B * C_)
-        shmem_size = (self.tile_size + self.k - 1) * (self.tile_size + self.k - 1) * 4
+# class SPPF(nn.Module):
+#     def __init__(self, c1, c2, k=5):
+#         super().__init__()
+#         c_ = c1 // 2
+#         self.cv1 = Conv(c1, c_, 1, 1)
+#         self.cv2 = Conv(c_ * 4, c2, 1, 1)
+#         self.k = k
+#         self.pad = k // 2
+#         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Sequential pooling
-        for src, dst in [(y0, pool1), (pool1, pool2), (pool2, pool3)]:
-            sppf_cuda.maxPoolKernel[grid, block, shmem_size](
-                src.data_ptr(), dst.data_ptr(), B, C_, H, W, 
-                self.k, self.pad, stream=torch.cuda.current_stream().cuda_stream
-            )
+#         # Query GPU properties
+#         self.adapt_kernel_config()
 
-        # Concatenate and apply cv2
-        y = torch.cat([y0, pool1, pool2, pool3], dim=1)  # [B, c_ * 4, H, W]
-        return self.cv2(y)
+#     def adapt_kernel_config(self):
+#         props = torch.cuda.get_device_properties(0)
+#         self.sm_count = props.multi_processor_count
+#         self.max_threads = props.max_threads_per_block
+#         self.shared_mem = props.shared_memory_per_block
+#         self.compute_cap = props.major * 10 + props.minor
+#         # Adjust tile size based on shared memory (e.g., fit 32x32 float tile)
+#         self.tile_size = 32  # Could be tuned further
+
+#     def forward(self, x):
+#         B, C_in, H, W = x.shape
+#         C_ = C_in // 2
+
+#         # Apply cv1
+#         y0 = self.cv1(x)  # [B, c_, H, W]
+
+#         # Prepare buffers
+#         pool1 = torch.zeros_like(y0)
+#         pool2 = torch.zeros_like(y0)
+#         pool3 = torch.zeros_like(y0)
+
+#         # Kernel launch parameters
+#         block = (min(self.tile_size, self.max_threads // self.tile_size), 
+#                  self.tile_size, 1)
+#         grid_x = (W + self.tile_size - self.k) // (self.tile_size - self.k + 1) + 1
+#         grid_y = (H + self.tile_size - self.k) // (self.tile_size - self.k + 1) + 1
+#         grid = (grid_x, grid_y, B * C_)
+#         shmem_size = (self.tile_size + self.k - 1) * (self.tile_size + self.k - 1) * 4
+
+#         # Sequential pooling
+#         for src, dst in [(y0, pool1), (pool1, pool2), (pool2, pool3)]:
+#             sppf_cuda.maxPoolKernel[grid, block, shmem_size](
+#                 src.data_ptr(), dst.data_ptr(), B, C_, H, W, 
+#                 self.k, self.pad, stream=torch.cuda.current_stream().cuda_stream
+#             )
+
+#         # Concatenate and apply cv2
+#         y = torch.cat([y0, pool1, pool2, pool3], dim=1)  # [B, c_ * 4, H, W]
+#         return self.cv2(y)
 
 
 class Attention(nn.Module):
