@@ -430,14 +430,10 @@ class ROCPerClass:
     @TryExcept("WARNING ⚠️ ROC Curve plot failure")
     @plt_settings()
     def plot(self, save_dir="", names=None, on_plot=None):
-        """
-        Plot ROC curves for each class and save them to a file.
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from pathlib import Path
 
-        Args:
-            save_dir (str): Directory to save the plot.
-            names (dict, optional): Class index to name mapping.
-            on_plot (callable, optional): Callback for plot path.
-        """
         tpr_per_class, fpr_per_class, auroc_per_class, _, _, mean_auroc, _, _ = self.get_roc_metrics()
         if names is None:
             names = {i: f"Class_{i}" for i in range(self.nc)}
@@ -447,8 +443,12 @@ class ROCPerClass:
         
         for cls in range(self.nc):
             if auroc_per_class[cls] > 0.0:
-                ax.plot(fpr_per_class[cls], tpr_per_class[cls], lw=2,
-                        label=f"{names[cls]} (AUROC = {auroc_per_class[cls]:.3f})")
+                fpr = fpr_per_class[cls]
+                tpr = tpr_per_class[cls]
+                if not (isinstance(fpr, np.ndarray) and isinstance(tpr, np.ndarray)):
+                    print(f"Skipping class {cls}: FPR type={type(fpr)}, TPR type={type(tpr)}")
+                    continue
+                ax.plot(fpr, tpr, lw=2, label=f"{names[cls]} (AUROC = {auroc_per_class[cls]:.3f})")
 
         ax.set_xlabel("False Positive Rate")
         ax.set_ylabel("True Positive Rate")
