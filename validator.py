@@ -10,7 +10,7 @@ from ultralytics.utils import LOGGER, ops
 from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
 from ultralytics.utils.plotting import output_to_target, plot_images
-from utils import AccuracyIoU, AccuracyIoUPerClass, ROCPerClass
+from utils import AccuracyIoU, AccuracyIoUPerClass
 
 
 class DetectionValidator(BaseValidator):
@@ -82,7 +82,6 @@ class DetectionValidator(BaseValidator):
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
         self.accuracy_iou_per_class = AccuracyIoUPerClass(nc=self.nc, conf=self.args.conf)
-        self.roc_per_class = ROCPerClass(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -163,7 +162,6 @@ class DetectionValidator(BaseValidator):
                 # calculate IoU and accuracy
                 self.accuracy_iou.process_batch(predn, bbox, cls)
                 self.accuracy_iou_per_class.process_batch(predn, bbox, cls)
-                self.roc_per_class.process_batch(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -198,7 +196,6 @@ class DetectionValidator(BaseValidator):
     def print_results(self):
         """Prints training/validation set metrics per class."""
         self.accuracy_iou.print() # print IoU and accuracy average
-        self.roc_per_class.print_avg() # print ROC average
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
         if self.nt_per_class.sum() == 0:
@@ -211,13 +208,11 @@ class DetectionValidator(BaseValidator):
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
             self.accuracy_iou_per_class.print(names=self.names)
-            self.roc_per_class.print(names=self.names)
         if self.args.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
                 )
-                self.roc_per_class.plot(save_dir=self.save_dir, names=self.names.values(), on_plot=self.on_plot)
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
