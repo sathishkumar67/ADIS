@@ -194,12 +194,12 @@ class AccuracyIoU:
         iou_per_class = {}
         acc_per_class = {}
         acc_per_class["Background"] = self.tn_predicted_background / (self.tn_predicted_background + self.fn_predicted_background) if self.tn_predicted_background + self.fn_predicted_background > 0 else 0.0
-        print(self.class_tp)
-        print(self.class_fn)
-        print(self.class_fp)
+
+        total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
+        
         for cls in range(self.nc):
-            iou_per_class[cls] = self.class_iou[cls] / self.class_tp[cls] if self.class_tp[cls] > 0 else 0.0
-            acc_per_class[cls] = self.class_tp[cls] / self.class_tp[cls] + self.class_fn[cls] + self.class_fp[cls] if self.class_tp[cls] + self.class_fn[cls] + self.class_fp[cls] > 0 else 0.0
+            iou_per_class[cls] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
+            acc_per_class[cls] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
         return iou_per_class, acc_per_class
 
     def print(self, names=None):
@@ -211,11 +211,24 @@ class AccuracyIoU:
         for cls in range(self.nc):
             LOGGER.info(f"{names[cls]:<20} | IoU: {iou_per_class[cls]:.3f} | Accuracy: {acc_per_class[cls]:.3f}")
             
+        # reset the values
+        self.reset()
+            
     def print_avg(self):
         """Print the average IoU and accuracy across all classes."""
         iou_per_class, acc_per_class = self.get_metrics()
-        print(iou_per_class)
-        print(acc_per_class)
         avg_iou = sum(iou_per_class.values()) / len(iou_per_class) if iou_per_class > 0.0 else 0.0
         avg_acc = sum(acc_per_class.values()) / len(acc_per_class) if acc_per_class > 0.0 else 0.0
         LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
+        
+        # reset the values
+        self.reset()
+        
+    def reset(self):
+        self.class_iou = {i: 0.0 for i in range(self.nc)}
+        self.class_tp = {i: 0 for i in range(self.nc)}
+        self.class_fp = {i: 0 for i in range(self.nc)}
+        self.class_fn = {i: 0 for i in range(self.nc)}
+        self.class_gt = {i: 0 for i in range(self.nc)}
+        self.tn_predicted_background = 0
+        self.fn_predicted_background = 0
