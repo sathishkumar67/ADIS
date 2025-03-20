@@ -81,7 +81,6 @@ class DetectionValidator(BaseValidator):
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
-        self.accuracy_iou_per_class = AccuracyIoUPerClass(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -161,7 +160,6 @@ class DetectionValidator(BaseValidator):
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # calculate IoU and accuracy
                 self.accuracy_iou.process_batch(predn, bbox, cls)
-                self.accuracy_iou_per_class.process_batch(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -195,7 +193,7 @@ class DetectionValidator(BaseValidator):
 
     def print_results(self):
         """Prints training/validation set metrics per class."""
-        self.accuracy_iou.print() # print IoU and accuracy average
+        self.accuracy_iou.print_avg() # print IoU and accuracy average
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
         if self.nt_per_class.sum() == 0:
@@ -207,7 +205,7 @@ class DetectionValidator(BaseValidator):
                 LOGGER.info(
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
-            self.accuracy_iou_per_class.print(names=self.names)
+            self.accuracy_iou.print()  # print IoU and accuracy per class
         if self.args.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(

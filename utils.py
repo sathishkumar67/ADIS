@@ -88,97 +88,6 @@ def unzip_file(zip_path: str, target_dir: str) -> None:
 
 class AccuracyIoU:
     """
-    A simplified class for calculating IoU and accuracy for object detection tasks.
-
-    Attributes:
-        nc (int): Number of classes.
-        conf (float): Confidence threshold for detections.
-        iou_thres (float): IoU threshold for matching detections to ground truth.
-        total_iou (float): Running sum of IoU values.
-        total_tp (int): Running sum of true positives.
-        total_gt (int): Running sum of ground truth instances.
-    """
-
-    def __init__(self, nc, conf=0.25, iou_thres=0.45):
-        """Initialize attributes for IoU and accuracy calculation."""
-        self.nc = nc  # number of classes
-        self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
-        self.iou_thres = iou_thres  # IoU threshold
-        self.total_iou = 0.0  # Running total IoU
-        self.total_tp = 0  # Running total true positives
-        self.total_gt = 0  # Running total ground truth instances
-
-    def process_batch(self, detections, gt_bboxes, gt_cls):
-        """
-        Process a batch to update IoU and accuracy metrics.
-
-        Args:
-            detections (torch.Tensor[N, 6]): Detected boxes with (x1, y1, x2, y2, conf, class).
-            gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
-            gt_cls (torch.Tensor[M]): Ground truth class labels.
-        """
-        # Handle empty ground truth
-        if gt_cls.shape[0] == 0:
-            return
-
-        # Handle no detections
-        if detections is None:
-            self.total_gt += gt_cls.shape[0]  # All ground truth are false negatives
-            return
-
-        # Filter detections by confidence
-        detections = detections[detections[:, 4] > self.conf]
-        if detections.shape[0] == 0:
-            self.total_gt += gt_cls.shape[0]  # No detections, all ground truth are FN
-            return
-
-        # Compute IoU between ground truth and detections
-        iou = box_iou(gt_bboxes, detections[:, :4])  # [M, N] IoU matrix
-        gt_classes = gt_cls.int()
-        detection_classes = detections[:, 5].int()
-
-        # Find matches between detections and ground truth
-        x = torch.where(iou > self.iou_thres)
-        if x[0].shape[0]:  # If there are matches
-            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
-            if x[0].shape[0] > 1:
-                # Sort by IoU in descending order and remove duplicates
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]  # Unique detection matches
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]  # Unique ground truth matches
-
-            m0, m1, iou_values = matches.transpose().astype(int)
-            matched_iou = matches[:, 2]  # IoU values for matched pairs
-            self.total_iou += matched_iou.sum()  # Sum IoU for matched detections
-            self.total_tp += len(matched_iou)  # Number of true positives
-            self.total_gt += gt_bboxes.shape[0]  # Total ground truth instances
-
-            # Log unmatched ground truth as FN (implicitly handled by total_gt - total_tp)
-        else:
-            self.total_gt += gt_bboxes.shape[0]  # No matches, all ground truth are FN
-
-    def get_metrics(self):
-        """
-        Calculate and return the average IoU and accuracy across all processed batches.
-
-        Returns:
-            tuple: (mean_iou, accuracy) where:
-                - mean_iou (float): Average IoU across all matched detections.
-                - accuracy (float): TP / (TP + FN) across all ground truth instances.
-        """
-        mean_iou = self.total_iou / self.total_tp if self.total_tp > 0 else 0.0
-        accuracy = self.total_tp / self.total_gt if self.total_gt > 0 else 0.0
-        return mean_iou, accuracy
-
-    def print(self):
-        """Print the calculated IoU and accuracy."""
-        mean_iou, accuracy = self.get_metrics()
-        LOGGER.info(f"                      AVG IoU: {mean_iou:.3f} | AVG Accuracy: {accuracy:.3f}")
-        
-
-class AccuracyIoUPerClass:
-    """
     A class for calculating IoU and accuracy per class for object detection tasks.
 
     Attributes:
@@ -191,14 +100,17 @@ class AccuracyIoUPerClass:
     """
 
     def __init__(self, nc, conf=0.25, iou_thres=0.45):
-        """Initialize attributes for per-class IoU and accuracy calculation."""
-        self.nc = nc  # number of classes
-        self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
-        self.iou_thres = iou_thres  # IoU threshold
-        self.class_iou = {i: 0.0 for i in range(nc)}  # Total IoU per class
-        self.class_tp = {i: 0 for i in range(nc)}    # True positives per class
-        self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
-
+        self.nc = nc
+        self.conf = 0.25 if conf in {None, 0.001} else conf
+        self.iou_thres = iou_thres
+        self.class_iou = {i: 0.0 for i in range(nc)} # Total IoU per class
+        self.class_tp = {i: 0 for i in range(nc)}   # True positives per class
+        self.class_fp = {i: 0 for i in range(nc)}  # False positives per class
+        self.class_gt = {i: 0 for i in range(nc)}   # Ground truth per class
+        self.tn_predicted = 0 # Added for TN at batch level
+        self.fn_predicted = 0 # Added for FN at batch level
+        self.fp_predicted = 0  # Added for FP at batch level
+        
     def process_batch(self, detections, gt_bboxes, gt_cls):
         """
         Process a batch to update IoU and accuracy metrics per class.
@@ -208,48 +120,68 @@ class AccuracyIoUPerClass:
             gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
             gt_cls (torch.Tensor[M]): Ground truth class labels.
         """
-        # Handle empty ground truth
-        if gt_cls.shape[0] == 0:
-            return
+        # Add fp_predicted in __init__ if not already present
+        if not hasattr(self, 'fp_predicted'):
+            self.fp_predicted = 0
 
-        # Update ground truth counts per class
-        gt_classes = gt_cls.int().cpu().numpy()
-        for gc in gt_classes:
-            self.class_gt[gc] += 1
-
-        # Handle no detections
         if detections is None:
-            return
+            if gt_cls.shape[0] != 0:
+                self.fn_predicted += 1  # No detections, objects present: FN
+            else:
+                self.tn_predicted += 1  # No detections, no objects: TN
+        else:
+            # Filter detections by confidence
+            detections = detections[detections[:, 4] > self.conf]
+            if gt_cls.shape[0] == 0:
+                if detections.shape[0] == 0:
+                    self.tn_predicted += 1  # No detections, no objects: TN
+                else:
+                    self.fp_predicted += 1  # Detections, no objects: FP
+                    # Update class_fp for unmatched detections
+                    detection_classes = detections[:, 5].int().cpu().numpy()
+                    for dc in detection_classes:
+                        self.class_fp[dc] += 1
+            else:
+                # Update ground truth counts
+                gt_classes = gt_cls.int().cpu().numpy()
+                for gc in gt_classes:
+                    self.class_gt[gc] += 1
 
-        # Filter detections by confidence
-        detections = detections[detections[:, 4] > self.conf]
-        if detections.shape[0] == 0:
-            return
+                # Compute IoU
+                iou = box_iou(gt_bboxes, detections[:, :4])
+                detection_classes = detections[:, 5].int().cpu().numpy()
 
-        # Compute IoU between ground truth and detections
-        iou = box_iou(gt_bboxes, detections[:, :4])  # [M, N] IoU matrix
-        detection_classes = detections[:, 5].int().cpu().numpy()
+                # Find matches
+                x = torch.where(iou > self.iou_thres)
+                matched_det = set()
+                if x[0].shape[0]:
+                    matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+                    if x[0].shape[0] > 1:
+                        matches = matches[matches[:, 2].argsort()[::-1]]
+                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                        matches = matches[matches[:, 2].argsort()[::-1]]
+                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
 
-        # Find matches between detections and ground truth
-        x = torch.where(iou > self.iou_thres)
-        if x[0].shape[0]:  # If there are matches
-            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
-            if x[0].shape[0] > 1:
-                # Sort by IoU in descending order and remove duplicates
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]  # Unique detection matches
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]  # Unique ground truth matches
+                    m0, m1, _ = matches.transpose().astype(int)  # m0: gt indices, m1: det indices
+                    matched_gt = set(m0)
+                    matched_det = set(m1)
+                    for i, gc in enumerate(gt_classes):
+                        if i in matched_gt:
+                            j = m0[m0 == i][0]
+                            k = m1[m0 == i][0]
+                            dc = detection_classes[k]
+                            if dc == gc:
+                                self.class_iou[gc] += matches[j, 2]
+                                self.class_tp[gc] += 1
+                            else:
+                                self.class_fp[dc] += 1
 
-            m0, m1, _ = matches.transpose().astype(int)  # m0: gt indices, m1: detection indices
-            for i, gc in enumerate(gt_classes):
-                j = m0 == i
-                if sum(j) == 1:  # If this ground truth box is matched
-                    dc = detection_classes[m1[j][0]]  # Predicted class
-                    if dc == gc:  # Correct class prediction
-                        iou_value = matches[j, 2][0]  # IoU for this match
-                        self.class_iou[gc] += iou_value
-                        self.class_tp[gc] += 1
+                # Update FP for unmatched detections
+                all_det_indices = set(range(detections.shape[0]))
+                unmatched_det_indices = all_det_indices - matched_det
+                for idx in unmatched_det_indices:
+                    dc = detection_classes[idx]
+                    self.class_fp[dc] += 1                    
 
     def get_metrics(self):
         """
@@ -258,13 +190,22 @@ class AccuracyIoUPerClass:
         Returns:
             tuple: (iou_per_class, acc_per_class) where:
                 - iou_per_class (dict): Average IoU for each class.
-                - acc_per_class (dict): Accuracy (TP / GT) for each class.
+                - acc_per_class (dict): Accuracy (TP / GT) for each class and background.
         """
         iou_per_class = {}
         acc_per_class = {}
+        # Background accuracy: TN / (TN + FP)
+        acc_per_class["Background"] = (
+            self.tn_predicted / (self.tn_predicted + self.fp_predicted)
+            if self.tn_predicted + self.fp_predicted > 0 else 0.0
+        )
         for cls in range(self.nc):
-            iou_per_class[cls] = self.class_iou[cls] / self.class_tp[cls] if self.class_tp[cls] > 0 else 0.0
-            acc_per_class[cls] = self.class_tp[cls] / self.class_gt[cls] if self.class_gt[cls] > 0 else 0.0
+            iou_per_class[cls] = (
+                self.class_iou[cls] / self.class_tp[cls] if self.class_tp[cls] > 0 else 0.0
+            )
+            acc_per_class[cls] = (
+                self.class_tp[cls] / self.class_gt[cls] if self.class_gt[cls] > 0 else 0.0
+            )
         return iou_per_class, acc_per_class
 
     def print(self, names=None):
@@ -275,3 +216,10 @@ class AccuracyIoUPerClass:
         LOGGER.info("Per-class IoU and Accuracy:")
         for cls in range(self.nc):
             LOGGER.info(f"{names[cls]:<20} | IoU: {iou_per_class[cls]:.3f} | Accuracy: {acc_per_class[cls]:.3f}")
+            
+    def print_avg(self):
+        """Print the average IoU and accuracy across all classes."""
+        iou_per_class, acc_per_class = self.get_metrics()
+        avg_iou = sum(iou_per_class.values()) / len(iou_per_class) if iou_per_class else 0.0
+        avg_acc = sum(acc_per_class.values()) / len(acc_per_class) if acc_per_class else 0.0
+        LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
