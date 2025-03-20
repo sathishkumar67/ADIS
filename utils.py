@@ -194,11 +194,12 @@ class AccuracyIoU:
         iou_per_class = {}
         acc_per_class = {}
         acc_per_class["Background"] = self.tn_predicted_background / (self.tn_predicted_background + self.fn_predicted_background) if self.tn_predicted_background + self.fn_predicted_background > 0 else 0.0
+        print(self.class_tp)
+        print(self.class_fn)
+        print(self.class_fp)
         for cls in range(self.nc):
             iou_per_class[cls] = self.class_iou[cls] / self.class_tp[cls] if self.class_tp[cls] > 0 else 0.0
             acc_per_class[cls] = self.class_tp[cls] / self.class_tp[cls] + self.class_fn[cls] + self.class_fp[cls] if self.class_tp[cls] + self.class_fn[cls] + self.class_fp[cls] > 0 else 0.0
-        print(iou_per_class)
-        print(acc_per_class)
         return iou_per_class, acc_per_class
 
     def print(self, names=None):
