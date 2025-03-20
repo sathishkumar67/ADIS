@@ -211,6 +211,8 @@ class AccuracyIoU:
     def print_avg(self):
         """Print the average IoU and accuracy across all classes."""
         iou_per_class, acc_per_class = self.get_metrics()
-        avg_iou = sum(iou_per_class.values()) / len(iou_per_class) if iou_per_class else 0.0
-        avg_acc = sum(acc_per_class.values()) / len(acc_per_class) if acc_per_class else 0.0
+        print(iou_per_class)
+        print(acc_per_class)
+        avg_iou = sum(iou_per_class.values()) / len(iou_per_class) if iou_per_class > 0.0 else 0.0
+        avg_acc = sum(acc_per_class.values()) / len(acc_per_class) if acc_per_class > 0.0 else 0.0
         LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
