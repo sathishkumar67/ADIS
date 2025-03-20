@@ -10,7 +10,7 @@ from ultralytics.utils import LOGGER, ops
 from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
 from ultralytics.utils.plotting import output_to_target, plot_images
-from utils import AccuracyIoU, AccuracyIoUPerClass
+from utils import ConfusionMatrixwithROC
 
 
 class DetectionValidator(BaseValidator):
@@ -80,8 +80,9 @@ class DetectionValidator(BaseValidator):
         self.metrics.names = self.names
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
-        self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
-        self.accuracy_iou_per_class = AccuracyIoUPerClass(nc=self.nc, conf=self.args.conf)
+        self.roc = ConfusionMatrixwithROC(nc=self.nc, conf=self.args.conf)
+        # self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
+        # self.accuracy_iou_per_class = AccuracyIoUPerClass(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -147,6 +148,7 @@ class DetectionValidator(BaseValidator):
                         self.stats[k].append(stat[k])
                     if self.args.plots:
                         self.confusion_matrix.process_batch(detections=None, gt_bboxes=bbox, gt_cls=cls)
+                        self.roc.process_batch(detections=None, gt_bboxes=bbox, gt_cls=cls)
                 continue
 
             # Predictions
@@ -160,10 +162,11 @@ class DetectionValidator(BaseValidator):
             if nl:
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # calculate IoU and accuracy
-                self.accuracy_iou.process_batch(predn, bbox, cls)
-                self.accuracy_iou_per_class.process_batch(predn, bbox, cls)
+                # self.accuracy_iou.process_batch(predn, bbox, cls)
+                # self.accuracy_iou_per_class.process_batch(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
+                self.roc.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
                 self.stats[k].append(stat[k])
 
@@ -195,7 +198,7 @@ class DetectionValidator(BaseValidator):
 
     def print_results(self):
         """Prints training/validation set metrics per class."""
-        self.accuracy_iou.print() # print IoU and accuracy average
+        # self.accuracy_iou.print() # print IoU and accuracy average
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results()))
         if self.nt_per_class.sum() == 0:
@@ -207,12 +210,13 @@ class DetectionValidator(BaseValidator):
                 LOGGER.info(
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
-            self.accuracy_iou_per_class.print(names=self.names)
+            # self.accuracy_iou_per_class.print(names=self.names)
         if self.args.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
                 )
+                self.roc.plot_roc(save_dir=self.save_dir, on_plot=self.on_plot)
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
