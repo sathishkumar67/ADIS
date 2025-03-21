@@ -80,7 +80,7 @@ class DetectionValidator(BaseValidator):
         self.metrics.names = self.names
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
-        self.accuracy_iou = AccuracyIoU(nc=self.nc, conf=self.args.conf)
+        self.accuracy_iou = AccuracyIoU(class_names=self.names, nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
