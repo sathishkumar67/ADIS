@@ -202,17 +202,16 @@ class AccuracyIoU:
             iou_per_class[self.class_names[cls]] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
             acc_per_class[self.class_names[cls]] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
             
-        print(iou_per_class)
-        print(acc_per_class)
         return iou_per_class, acc_per_class
 
     def print(self):
         """Print IoU and accuracy for each class."""
         iou_per_class, acc_per_class = self.get_metrics()
         LOGGER.info("Per-class IoU and Accuracy:")
-        for cls in self.class_names:
-            LOGGER.info(f"{cls:<20} | IoU: {iou_per_class[cls]:.3f} | Accuracy: {acc_per_class[cls]:.3f}")
-            
+        for key, value in iou_per_class.items():
+            LOGGER.info(f"{key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
+        # print background class
+        LOGGER.info(f"Background: Accuracy: {acc_per_class['Background']:.3f}")
         # reset the values
         self.reset()
             
