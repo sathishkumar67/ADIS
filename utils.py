@@ -99,16 +99,17 @@ class AccuracyIoU:
     class_gt (dict): Dictionary to store ground truth counts per class.
     """
 
-    def __init__(self, nc, conf=0.25, iou_thres=0.45):
+    def __init__(self,class_names, nc, conf=0.25, iou_thres=0.45):
         """Initialize attributes for per-class IoU and accuracy calculation."""
         self.nc = nc  # number of classes
+        self.names = class_names
         self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
         self.iou_thres = iou_thres  # IoU threshold
-        self.class_iou = {i: 0.0 for i in range(nc)}  # Total IoU per class
-        self.class_tp = {i: 0 for i in range(nc)}    # True positives per class
-        self.class_fp = {i: 0 for i in range(nc)}    # False positives per class
-        self.class_fn = {i: 0 for i in range(nc)}    # False negatives per class
-        self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
+        self.class_iou = {i: 0 for i in self.names}   # IoU per class
+        self.class_tp = {i: 0 for i in self.names}    # True positives per class
+        self.class_fp = {i: 0 for i in self.names}    # False positives per class
+        self.class_fn = {i: 0 for i in self.names}    # False negatives per class
+        self.class_gt = {i: 0 for i in self.names}    # Ground truth instances per class
         self.tn_predicted_background = 0             # Total true negatives predicted(background)
         self.fn_predicted_background = 0             # Total false negatives predicted(background)   
 
@@ -195,9 +196,9 @@ class AccuracyIoU:
         acc_per_class = {}
         acc_per_class["Background"] = self.tn_predicted_background / (self.tn_predicted_background + self.fn_predicted_background) if self.tn_predicted_background + self.fn_predicted_background > 0 else 0.0
 
-        total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
+        total = {cls: self.class_tp[cls] + self.class_fn[cls] + self.class_fp[cls] for cls in self.names}
         
-        for cls in range(self.nc):
+        for cls in self.names:
             iou_per_class[cls] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
             acc_per_class[cls] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
         return iou_per_class, acc_per_class
@@ -220,9 +221,6 @@ class AccuracyIoU:
         avg_iou = sum(iou_per_class.values()) / self.nc if sum(iou_per_class.values()) > 0.0 else 0.0
         avg_acc = sum(acc_per_class.values()) / self.nc if sum(acc_per_class.values()) > 0.0 else 0.0
         LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
-        
-        # reset the values
-        self.reset()
         
     def reset(self):
         self.class_iou = {i: 0.0 for i in range(self.nc)}
