@@ -211,6 +211,7 @@ class DetectionValidator(BaseValidator):
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
                 )
+                self.accuracy_iou.plot_roc_curve(save_path=self.save_dir / "roc_curve.png")
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
