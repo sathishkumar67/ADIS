@@ -423,10 +423,19 @@ class AccuracyIoU:
         auroc = auc(fpr, tpr)
         return fpr, tpr, thresholds, auroc
 
-    def plot_roc_curve(self):
-        """Plot the ROC curve and display the AUROC."""
+    def plot_roc_curve(self, save_path=None):
+        """
+        Plot the ROC curve and display the AUROC. Optionally save the plot.
+
+        Args:
+            save_path (str, optional): Path to save the plot (e.g., 'roc_curve.png'). 
+                                    If None, the plot is not saved.
+
+        Returns:
+            matplotlib.figure.Figure: The figure object for further manipulation.
+        """
         fpr, tpr, _, auroc = self.compute_roc_curve()
-        plt.figure()
+        fig = plt.figure()
         plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUROC = {auroc:.2f})')
         plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random Guess')
         plt.xlim([0.0, 1.0])
@@ -436,6 +445,7 @@ class AccuracyIoU:
         plt.title('Receiver Operating Characteristic - Object Presence')
         plt.legend(loc="lower right")
         plt.grid(True)
-        plt.show()
-        # Reset the values
+        if save_path:
+            fig.savefig(save_path, dpi=300)
         self.reset()
+        return fig
