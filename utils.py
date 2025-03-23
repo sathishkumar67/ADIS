@@ -8,6 +8,7 @@ import numpy as np
 from ultralytics.utils import LOGGER
 from ultralytics.utils.metrics import *
 import matplotlib.pyplot as plt
+from sklearn.metrics import auc
 
 
 
@@ -233,7 +234,7 @@ class AccuracyIoU:
         self.fn_predicted_background = 0
         
         
-class ConfusionMatrix:
+class AUROC:
     """
     A class for calculating and updating a confusion matrix for object detection and classification tasks.
 
@@ -245,7 +246,7 @@ class ConfusionMatrix:
         iou_thres (float): The Intersection over Union threshold.
     """
 
-    def __init__(self, nc, conf=0.25, iou_thres=0.45, task="detect"):
+    def __init__(self, nc, class_names, iou_thres=0.45, task="detect"):
         """
         Initialize a ConfusionMatrix instance.
 
@@ -256,24 +257,17 @@ class ConfusionMatrix:
             task (str, optional): Type of task, either 'detect' or 'classify'.
         """
         self.task = task
-        self.matrix = np.zeros((nc + 1, nc + 1)) if self.task == "detect" else np.zeros((nc, nc))
         self.nc = nc  # number of classes
-        self.conf = 0.25 if conf in {None, 0.001} else conf  # apply 0.25 if default val conf is passed
-        self.iou_thres = iou_thres
+        self.class_names = class_names
+        self.iou_thres = iou_thres # IoU threshold
+        self.matrix = np.zeros((nc + 1, nc + 1))     # confusion matrix 
+        self.overall_results = {}
+        self.detections = []
+        self.gt_bboxes = []
+        self.gt_cls = []
+        
 
-    def process_cls_preds(self, preds, targets):
-        """
-        Update confusion matrix for classification task.
-
-        Args:
-            preds (Array[N, min(nc,5)]): Predicted class labels.
-            targets (Array[N, 1]): Ground truth class labels.
-        """
-        preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
-        for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy()):
-            self.matrix[p][t] += 1
-
-    def process_batch(self, detections, gt_bboxes, gt_cls):
+    def process_batch(self, detections, gt_bboxes, gt_cls, conf):
         """
         Update confusion matrix for object detection task.
 
@@ -286,7 +280,7 @@ class ConfusionMatrix:
         """
         if gt_cls.shape[0] == 0:  # Check if labels is empty
             if detections is not None:
-                detections = detections[detections[:, 4] > self.conf]
+                detections = detections[detections[:, 4] > conf]
                 detection_classes = detections[:, 5].int()
                 for dc in detection_classes:
                     self.matrix[dc, self.nc] += 1  # false positives
@@ -297,7 +291,7 @@ class ConfusionMatrix:
                 self.matrix[self.nc, gc] += 1  # background FN
             return
 
-        detections = detections[detections[:, 4] > self.conf]
+        detections = detections[detections[:, 4] > conf]
         gt_classes = gt_cls.int()
         detection_classes = detections[:, 5].int()
         is_obb = detections.shape[1] == 7 and gt_bboxes.shape[1] == 5  # with additional `angle` dimension
@@ -331,72 +325,124 @@ class ConfusionMatrix:
             if not any(m1 == i):
                 self.matrix[dc, self.nc] += 1  # predicted background
 
-    def matrix(self):
-        """Return the confusion matrix."""
-        return self.matrix
-
-    def tp_fp(self):
-        """
-        Return true positives and false positives.
-
-        Returns:
-            (tuple): True positives and false positives.
-        """
-        tp = self.matrix.diagonal()  # true positives
-        fp = self.matrix.sum(1) - tp  # false positives
-        # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
-        return (tp[:-1], fp[:-1]) if self.task == "detect" else (tp, fp)  # remove background class if task=detect
-
-    @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
-    @plt_settings()
-    def plot(self, normalize=True, save_dir="", names=(), on_plot=None):
-        """
-        Plot the confusion matrix using seaborn and save it to a file.
-
-        Args:
-            normalize (bool): Whether to normalize the confusion matrix.
-            save_dir (str): Directory where the plot will be saved.
-            names (tuple): Names of classes, used as labels on the plot.
-            on_plot (func): An optional callback to pass plots path and data when they are rendered.
-        """
-        print(self.matrix)
-        print(self.matrix.shape)
-        import seaborn  # scope for faster 'import ultralytics'
-
-        array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
-        array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
-
-        fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
-        nc, nn = self.nc, len(names)  # number of classes, names
-        seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
-        labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
-        ticklabels = (list(names) + ["background"]) if labels else "auto"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
-            seaborn.heatmap(
-                array,
-                ax=ax,
-                annot=nc < 30,
-                annot_kws={"size": 8},
-                cmap="Blues",
-                fmt=".2f" if normalize else ".0f",
-                square=True,
-                vmin=0.0,
-                xticklabels=ticklabels,
-                yticklabels=ticklabels,
-            ).set_facecolor((1, 1, 1))
-        title = "Confusion Matrix" + " Normalized" * normalize
-        ax.set_xlabel("True")
-        ax.set_ylabel("Predicted")
-        ax.set_title(title)
-        plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
-        fig.savefig(plot_fname, dpi=250)
-        plt.close(fig)
-        if on_plot:
-            on_plot(plot_fname)
+    def calculate_metrics(self, matrix):
+        # Number of classes (e.g., 12 for a 12x12 confusion matrix)
+        N = len(matrix)
         
+        # Compute the sum of each row (actual class totals)
+        row_sums = [sum(matrix[i]) for i in range(N)]
+        
+        # Compute the sum of each column (predicted class totals)
+        col_sums = [sum(matrix[i][j] for i in range(N)) for j in range(N)]
+        
+        # Compute the total sum of all elements in the confusion matrix
+        total_sum = sum(row_sums)
+        
+        # Initialize the results dictionary
+        results = {}
+        
+        # Calculate metrics for each class
+        for i in range(N):
+            # True Positives: correctly predicted instances for class i
+            TP = matrix[i][i]
+            
+            # False Positives: instances predicted as class i but belong to other classes
+            FP = col_sums[i] - TP
+            
+            # False Negatives: instances of class i predicted as other classes
+            FN = row_sums[i] - TP
+            
+            # True Negatives: instances not of class i and not predicted as class i
+            TN = total_sum - row_sums[i] - col_sums[i] + TP
+            
+            # Store the metrics in the dictionary with class i as the key
+            results[i] = {'TP': TP, 'FP': FP, 'TN': TN, 'FN': FN}
+        
+        # Return the dictionary containing metrics for all classes
+        return results
+    
+    def aggregate_batches(self, detections, gt_bboxes, gt_cls):
+        self.detections.append(detections)
+        self.gt_bboxes.append(gt_bboxes)
+        self.gt_cls.append(gt_cls)
+    
+    def roc_curve_calculation(self):
+        thresholds = [1.0, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20, 0.10, 0.0]
+        for current_confidence in thresholds:
+            self.matrix = np.zeros((self.nc + 1, self.nc + 1))     # confusion matrix
+            for detections, gt_bboxes, gt_cls in zip(self.detections, self.gt_bboxes, self.gt_cls):
+                self.process_batch(detections, gt_bboxes, gt_cls, current_confidence)
+            results = self.calculate_metrics(self.matrix)
+            self.overall_results[current_confidence] = results
+            
+    def plot_roc_curve(self):
+        self.roc_curve_calculation()
+        print(self.overall_results)
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    # @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
+    # @plt_settings()
+    # def plot(self, normalize=True, save_dir="", names=(), on_plot=None):
+    #     """
+    #     Plot the confusion matrix using seaborn and save it to a file.
 
-    def print(self):
-        """Print the confusion matrix to the console."""
-        for i in range(self.matrix.shape[0]):
-            LOGGER.info(" ".join(map(str, self.matrix[i])))
+    #     Args:
+    #         normalize (bool): Whether to normalize the confusion matrix.
+    #         save_dir (str): Directory where the plot will be saved.
+    #         names (tuple): Names of classes, used as labels on the plot.
+    #         on_plot (func): An optional callback to pass plots path and data when they are rendered.
+    #     """
+    #     import seaborn  # scope for faster 'import ultralytics'
+
+    #     array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
+    #     array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
+
+    #     fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
+    #     nc, nn = self.nc, len(names)  # number of classes, names
+    #     seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
+    #     labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
+    #     ticklabels = (list(names) + ["background"]) if labels else "auto"
+    #     with warnings.catch_warnings():
+    #         warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
+    #         seaborn.heatmap(
+    #             array,
+    #             ax=ax,
+    #             annot=nc < 30,
+    #             annot_kws={"size": 8},
+    #             cmap="Blues",
+    #             fmt=".2f" if normalize else ".0f",
+    #             square=True,
+    #             vmin=0.0,
+    #             xticklabels=ticklabels,
+    #             yticklabels=ticklabels,
+    #         ).set_facecolor((1, 1, 1))
+    #     title = "Confusion Matrix" + " Normalized" * normalize
+    #     ax.set_xlabel("True")
+    #     ax.set_ylabel("Predicted")
+    #     ax.set_title(title)
+    #     plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
+    #     fig.savefig(plot_fname, dpi=250)
+    #     plt.close(fig)
+    #     if on_plot:
+    #         on_plot(plot_fname)
