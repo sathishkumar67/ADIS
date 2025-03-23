@@ -8,9 +8,9 @@ from ultralytics.data import build_dataloader, build_yolo_dataset, converter
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, ops
 from ultralytics.utils.checks import check_requirements
-from ultralytics.utils.metrics import  DetMetrics, box_iou
+from ultralytics.utils.metrics import  DetMetrics, box_iou, ConfusionMatrix
 from ultralytics.utils.plotting import output_to_target, plot_images
-from utils import AccuracyIoU, ConfusionMatrix
+from utils import AccuracyIoU, AUROC
 
 
 class DetectionValidator(BaseValidator):
@@ -81,6 +81,7 @@ class DetectionValidator(BaseValidator):
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.accuracy_iou = AccuracyIoU(class_names=self.names, nc=self.nc, conf=self.args.conf)
+        self.auroc = AUROC(nc=self.nc, class_names=self.names, iou_thres=self.args.iou)
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -160,6 +161,7 @@ class DetectionValidator(BaseValidator):
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # calculate IoU and accuracy
                 self.accuracy_iou.process_batch(predn, bbox, cls)
+                self.auroc.aggregate_batches(predn, bbox, cls)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -211,6 +213,7 @@ class DetectionValidator(BaseValidator):
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
                 )
+            self.auroc.plot_roc_curve()
 
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
