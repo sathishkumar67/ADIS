@@ -6,8 +6,7 @@ import math
 from tqdm import tqdm
 import numpy as np
 from ultralytics.utils import LOGGER
-from ultralytics.utils.metrics import box_iou, LOGGER
-from sklearn.metrics import roc_curve, auc
+from ultralytics.utils.metrics import *
 import matplotlib.pyplot as plt
 
 
@@ -88,230 +87,60 @@ def unzip_file(zip_path: str, target_dir: str) -> None:
                 pbar.update(zinfo.file_size)
 
 
-# class AccuracyIoU:
-#     """
-#     A class for calculating IoU and accuracy per class for object detection tasks.
-
-#     Attributes:
-#     nc (int): Number of classes.
-#     conf (float): Confidence threshold for detections.
-#     iou_thres (float): IoU threshold for matching detections to ground truth.
-#     class_iou (dict): Dictionary to store total IoU sums per class.
-#     class_tp (dict): Dictionary to store true positive counts per class.
-#     class_gt (dict): Dictionary to store ground truth counts per class.
-#     """
-
-#     def __init__(self, class_names, nc, conf=0.25, iou_thres=0.45):
-#         """Initialize attributes for per-class IoU and accuracy calculation."""
-#         self.nc = nc  # number of classes
-#         self.class_names = class_names
-#         self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
-#         self.iou_thres = iou_thres  # IoU threshold
-#         self.class_iou = {i: 0.0 for i in range(nc)}  # Total IoU per class
-#         self.class_tp = {i: 0 for i in range(nc)}    # True positives per class
-#         self.class_fp = {i: 0 for i in range(nc)}    # False positives per class
-#         self.class_fn = {i: 0 for i in range(nc)}    # False negatives per class
-#         self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
-#         self.tn_predicted_background = 0             # Total true negatives predicted(background)
-#         self.fn_predicted_background = 0             # Total false negatives predicted(background)   
-
-#     def process_batch(self, detections, gt_bboxes, gt_cls):
-#         """
-#         Process a batch to update IoU and accuracy metrics per class.
-
-#         Args:
-#             detections (torch.Tensor[N, 6]): Detected boxes with (x1, y1, x2, y2, conf, class).
-#             gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
-#             gt_cls (torch.Tensor[M]): Ground truth class labels.
-#         """
-        
-#         if detections is None:
-#             if gt_cls.shape[0] != 0:
-#                 self.fn_predicted_background += 1  # No detections, objects present: FN
-#             else:
-#                 self.tn_predicted_background += 1  # No detections, no objects: TN
-#         else:
-#             # Filter detections by confidence
-#             detections = detections[detections[:, 4] > self.conf]
-#             if gt_cls.shape[0] == 0:
-#                 if detections.shape[0] == 0:
-#                     self.tn_predicted_background += 1  # No detections, no objects: TN
-#                 else:
-#                     # Detections, no objects: FP
-#                     # Update class_fp for unmatched detections
-#                     detection_classes = detections[:, 5].int().cpu().numpy()
-#                     for dc in detection_classes:
-#                         self.class_fp[dc] += 1
-#             else:
-#                 # Update ground truth counts per class
-#                 gt_classes = gt_cls.int().cpu().numpy()
-#                 for gc in gt_classes:
-#                     self.class_gt[gc] += 1
-
-#                 # Compute IoU between ground truth and detections
-#                 iou = box_iou(gt_bboxes, detections[:, :4])  # [M, N] IoU matrix
-#                 detection_classes = detections[:, 5].int().cpu().numpy()
-
-#                 # Find matches between detections and ground truth
-#                 x = torch.where(iou > self.iou_thres)
-                
-#                 if x[0].shape[0]:  # If there are matches
-#                     matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
-#                     if x[0].shape[0] > 1:
-#                         # Sort by IoU in descending order and remove duplicates
-#                         matches = matches[matches[:, 2].argsort()[::-1]]
-#                         matches = matches[np.unique(matches[:, 1], return_index=True)[1]]  # Unique detection matches
-#                         matches = matches[matches[:, 2].argsort()[::-1]]
-#                         matches = matches[np.unique(matches[:, 0], return_index=True)[1]]  # Unique ground truth matches
-
-#                     m0, m1, _ = matches.transpose().astype(int)  # m0: gt indices, m1: detection indices
-#                     for i, gc in enumerate(gt_classes):
-#                         j = m0 == i
-#                         if sum(j) == 1:  # If this ground truth box is matched
-#                             dc = detection_classes[m1[j][0]]  # Predicted class
-#                             if dc == gc:  # Correct class prediction
-#                                 iou_value = matches[j, 2][0]  # IoU for this match
-#                                 self.class_iou[gc] += iou_value
-#                                 self.class_tp[gc] += 1
-#                             else:  # Incorrect class prediction
-#                                 self.class_fp[dc] += 1
-#                                 self.class_fn[gc] += 1
-#                         else:  # False negative
-#                             self.class_fn[gc] += 1
-#                 else:  
-#                     # updated Fp and FN for unmatched detections
-#                     for dc in detection_classes:
-#                         self.class_fp[dc] += 1
-#                     for gc in gt_classes:
-#                         self.class_fn[gc] += 1
-
-#     def get_metrics(self):
-#         """
-#         Calculate and return IoU and accuracy per class.
-
-#         Returns:
-#             tuple: (iou_per_class, acc_per_class) where:
-#                 - iou_per_class (dict): Average IoU for each class.
-#                 - acc_per_class (dict): Accuracy (TP / GT) for each class.
-#         """
-#         iou_per_class = {}
-#         acc_per_class = {}
-#         acc_per_class["Background"] = self.tn_predicted_background / (self.tn_predicted_background + self.fn_predicted_background) if self.tn_predicted_background + self.fn_predicted_background > 0 else 0.0
-
-#         total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
-        
-#         for cls in range(self.nc):
-#             iou_per_class[self.class_names[cls]] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
-#             acc_per_class[self.class_names[cls]] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
-            
-#         return iou_per_class, acc_per_class
-
-#     def print(self):
-#         """Print IoU and accuracy for each class."""
-#         iou_per_class, acc_per_class = self.get_metrics()
-#         LOGGER.info("Per-class IoU and Accuracy:")
-#         for key, value in iou_per_class.items():
-#             LOGGER.info(f"{key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-#         # print background class
-#         LOGGER.info(f"Background: Accuracy: {acc_per_class['Background']:.3f}")
-#         # reset the values
-#         self.reset()
-            
-#     def print_avg(self):
-#         """Print the average IoU and accuracy across all classes."""
-#         iou_per_class, acc_per_class = self.get_metrics()
-#         avg_iou = sum(iou_per_class.values()) / self.nc if sum(iou_per_class.values()) > 0.0 else 0.0
-#         avg_acc = sum(acc_per_class.values()) / self.nc if sum(acc_per_class.values()) > 0.0 else 0.0
-#         LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
-        
-#     def reset(self):
-#         self.class_iou = {i: 0.0 for i in range(self.nc)}
-#         self.class_tp = {i: 0 for i in range(self.nc)}
-#         self.class_fp = {i: 0 for i in range(self.nc)}
-#         self.class_fn = {i: 0 for i in range(self.nc)}
-#         self.class_gt = {i: 0 for i in range(self.nc)}
-#         self.tn_predicted_background = 0
-#         self.fn_predicted_background = 0
-        
-        
 class AccuracyIoU:
     """
-    A class for calculating IoU and accuracy per class for object detection tasks,
-    and for computing the ROC curve and AUROC for object presence detection.
+    A class for calculating IoU and accuracy per class for object detection tasks.
 
     Attributes:
-        nc (int): Number of classes.
-        conf (float): Confidence threshold for detections.
-        iou_thres (float): IoU threshold for matching detections to ground truth.
-        class_iou (dict): Dictionary to store total IoU sums per class.
-        class_tp (dict): Dictionary to store true positive counts per class.
-        class_fp (dict): Dictionary to store false positive counts per class.
-        class_fn (dict): Dictionary to store false negative counts per class.
-        class_gt (dict): Dictionary to store ground truth counts per class.
-        tn_predicted_background (int): Total true negatives for background.
-        fn_predicted_background (int): Total false negatives for background.
-        max_conf_per_image (list): List of maximum confidence scores per image.
-        has_object_per_image (list): List indicating if each image has at least one object.
+    nc (int): Number of classes.
+    conf (float): Confidence threshold for detections.
+    iou_thres (float): IoU threshold for matching detections to ground truth.
+    class_iou (dict): Dictionary to store total IoU sums per class.
+    class_tp (dict): Dictionary to store true positive counts per class.
+    class_gt (dict): Dictionary to store ground truth counts per class.
     """
 
     def __init__(self, class_names, nc, conf=0.25, iou_thres=0.45):
-        """
-        Initialize attributes for per-class IoU, accuracy, and ROC calculation.
-        
-        Args:
-            class_names (list): List of class names.
-            nc (int): Number of classes.
-            conf (float, optional): Confidence threshold. Defaults to 0.25.
-            iou_thres (float, optional): IoU threshold. Defaults to 0.45.
-        """
-        self.nc = nc  # Number of classes
+        """Initialize attributes for per-class IoU and accuracy calculation."""
+        self.nc = nc  # number of classes
         self.class_names = class_names
-        self.conf = 0.25 if conf in {None, 0.001} else conf  # Confidence threshold
+        self.conf = 0.25 if conf in {None, 0.001} else conf  # confidence threshold
         self.iou_thres = iou_thres  # IoU threshold
         self.class_iou = {i: 0.0 for i in range(nc)}  # Total IoU per class
         self.class_tp = {i: 0 for i in range(nc)}    # True positives per class
         self.class_fp = {i: 0 for i in range(nc)}    # False positives per class
         self.class_fn = {i: 0 for i in range(nc)}    # False negatives per class
         self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
-        self.tn_predicted_background = 0             # Total true negatives predicted (background)
-        self.fn_predicted_background = 0             # Total false negatives predicted (background)
-        # For ROC curve
-        self.max_conf_per_image = []
-        self.has_object_per_image = []
+        self.tn_predicted_background = 0             # Total true negatives predicted(background)
+        self.fn_predicted_background = 0             # Total false negatives predicted(background)   
 
     def process_batch(self, detections, gt_bboxes, gt_cls):
         """
-        Process a batch to update IoU, accuracy, and ROC metrics.
+        Process a batch to update IoU and accuracy metrics per class.
 
         Args:
             detections (torch.Tensor[N, 6]): Detected boxes with (x1, y1, x2, y2, conf, class).
             gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
             gt_cls (torch.Tensor[M]): Ground truth class labels.
         """
-        # Compute max confidence for ROC curve using raw detections
-        if detections is not None and detections.shape[0] > 0:
-            max_conf = detections[:, 4].max().item()
-        else:
-            max_conf = 0.0
-        has_object = gt_cls.shape[0] > 0
-        self.max_conf_per_image.append(max_conf)
-        self.has_object_per_image.append(has_object)
-
-        # Filter detections by confidence for other metrics
-        if detections is not None:
-            detections = detections[detections[:, 4] > self.conf]
-
-        if detections is None or detections.shape[0] == 0:
+        
+        if detections is None:
             if gt_cls.shape[0] != 0:
                 self.fn_predicted_background += 1  # No detections, objects present: FN
             else:
                 self.tn_predicted_background += 1  # No detections, no objects: TN
         else:
+            # Filter detections by confidence
+            detections = detections[detections[:, 4] > self.conf]
             if gt_cls.shape[0] == 0:
-                # Detections, no objects: FP
-                detection_classes = detections[:, 5].int().cpu().numpy()
-                for dc in detection_classes:
-                    self.class_fp[dc] += 1
+                if detections.shape[0] == 0:
+                    self.tn_predicted_background += 1  # No detections, no objects: TN
+                else:
+                    # Detections, no objects: FP
+                    # Update class_fp for unmatched detections
+                    detection_classes = detections[:, 5].int().cpu().numpy()
+                    for dc in detection_classes:
+                        self.class_fp[dc] += 1
             else:
                 # Update ground truth counts per class
                 gt_classes = gt_cls.int().cpu().numpy()
@@ -324,7 +153,7 @@ class AccuracyIoU:
 
                 # Find matches between detections and ground truth
                 x = torch.where(iou > self.iou_thres)
-
+                
                 if x[0].shape[0]:  # If there are matches
                     matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
                     if x[0].shape[0] > 1:
@@ -348,8 +177,8 @@ class AccuracyIoU:
                                 self.class_fn[gc] += 1
                         else:  # False negative
                             self.class_fn[gc] += 1
-                else:
-                    # No matches: all detections are FP, all GT are FN
+                else:  
+                    # updated Fp and FN for unmatched detections
                     for dc in detection_classes:
                         self.class_fp[dc] += 1
                     for gc in gt_classes:
@@ -362,38 +191,39 @@ class AccuracyIoU:
         Returns:
             tuple: (iou_per_class, acc_per_class) where:
                 - iou_per_class (dict): Average IoU for each class.
-                - acc_per_class (dict): Accuracy (TP / (TP + FP + FN)) for each class.
+                - acc_per_class (dict): Accuracy (TP / GT) for each class.
         """
         iou_per_class = {}
         acc_per_class = {}
         acc_per_class["Background"] = self.tn_predicted_background / (self.tn_predicted_background + self.fn_predicted_background) if self.tn_predicted_background + self.fn_predicted_background > 0 else 0.0
 
         total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
-
+        
         for cls in range(self.nc):
             iou_per_class[self.class_names[cls]] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
             acc_per_class[self.class_names[cls]] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
-
+            
         return iou_per_class, acc_per_class
 
     def print(self):
         """Print IoU and accuracy for each class."""
         iou_per_class, acc_per_class = self.get_metrics()
-        print("Per-class IoU and Accuracy:")
+        LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
-            print(f"{key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-        # Print background class
-        print(f"Background: Accuracy: {acc_per_class['Background']:.3f}")
-
+            LOGGER.info(f"{key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
+        # print background class
+        LOGGER.info(f"Background: Accuracy: {acc_per_class['Background']:.3f}")
+        # reset the values
+        self.reset()
+            
     def print_avg(self):
         """Print the average IoU and accuracy across all classes."""
         iou_per_class, acc_per_class = self.get_metrics()
         avg_iou = sum(iou_per_class.values()) / self.nc if sum(iou_per_class.values()) > 0.0 else 0.0
         avg_acc = sum(acc_per_class.values()) / self.nc if sum(acc_per_class.values()) > 0.0 else 0.0
-        print(f"Average IoU: {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
-
+        LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
+        
     def reset(self):
-        """Reset all metrics to zero."""
         self.class_iou = {i: 0.0 for i in range(self.nc)}
         self.class_tp = {i: 0 for i in range(self.nc)}
         self.class_fp = {i: 0 for i in range(self.nc)}
@@ -401,51 +231,172 @@ class AccuracyIoU:
         self.class_gt = {i: 0 for i in range(self.nc)}
         self.tn_predicted_background = 0
         self.fn_predicted_background = 0
-        self.max_conf_per_image = []
-        self.has_object_per_image = []
+        
+        
+class ConfusionMatrix:
+    """
+    A class for calculating and updating a confusion matrix for object detection and classification tasks.
 
-    def compute_roc_curve(self):
-        """
-        Compute the ROC curve and AUROC for the binary task of object presence.
+    Attributes:
+        task (str): The type of task, either 'detect' or 'classify'.
+        matrix (np.ndarray): The confusion matrix, with dimensions depending on the task.
+        nc (int): The number of classes.
+        conf (float): The confidence threshold for detections.
+        iou_thres (float): The Intersection over Union threshold.
+    """
 
-        Returns:
-            tuple: (fpr, tpr, thresholds, auroc) where:
-                - fpr (array): False Positive Rates.
-                - tpr (array): True Positive Rates.
-                - thresholds (array): Confidence thresholds.
-                - auroc (float): Area Under the ROC Curve.
+    def __init__(self, nc, conf=0.25, iou_thres=0.45, task="detect"):
         """
-        if not self.max_conf_per_image or not self.has_object_per_image:
-            raise ValueError("No data collected for ROC computation.")
-        y_true = self.has_object_per_image  # True labels: True if image has object
-        y_score = self.max_conf_per_image   # Scores: max confidence per image
-        fpr, tpr, thresholds = roc_curve(y_true, y_score)
-        auroc = auc(fpr, tpr)
-        return fpr, tpr, thresholds, auroc
-
-    def plot_roc_curve(self, save_path=None):
-        """
-        Plot the ROC curve and display the AUROC. Optionally save the plot.
+        Initialize a ConfusionMatrix instance.
 
         Args:
-            save_path (str, optional): Path to save the plot (e.g., 'roc_curve.png'). 
-                                    If None, the plot is not saved.
+            nc (int): Number of classes.
+            conf (float, optional): Confidence threshold for detections.
+            iou_thres (float, optional): IoU threshold for matching detections to ground truth.
+            task (str, optional): Type of task, either 'detect' or 'classify'.
+        """
+        self.task = task
+        self.matrix = np.zeros((nc + 1, nc + 1)) if self.task == "detect" else np.zeros((nc, nc))
+        self.nc = nc  # number of classes
+        self.conf = 0.25 if conf in {None, 0.001} else conf  # apply 0.25 if default val conf is passed
+        self.iou_thres = iou_thres
+
+    def process_cls_preds(self, preds, targets):
+        """
+        Update confusion matrix for classification task.
+
+        Args:
+            preds (Array[N, min(nc,5)]): Predicted class labels.
+            targets (Array[N, 1]): Ground truth class labels.
+        """
+        preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
+        for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy()):
+            self.matrix[p][t] += 1
+
+    def process_batch(self, detections, gt_bboxes, gt_cls):
+        """
+        Update confusion matrix for object detection task.
+
+        Args:
+            detections (Array[N, 6] | Array[N, 7]): Detected bounding boxes and their associated information.
+                                      Each row should contain (x1, y1, x2, y2, conf, class)
+                                      or with an additional element `angle` when it's obb.
+            gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
+            gt_cls (Array[M]): The class labels.
+        """
+        if gt_cls.shape[0] == 0:  # Check if labels is empty
+            if detections is not None:
+                detections = detections[detections[:, 4] > self.conf]
+                detection_classes = detections[:, 5].int()
+                for dc in detection_classes:
+                    self.matrix[dc, self.nc] += 1  # false positives
+            return
+        if detections is None:
+            gt_classes = gt_cls.int()
+            for gc in gt_classes:
+                self.matrix[self.nc, gc] += 1  # background FN
+            return
+
+        detections = detections[detections[:, 4] > self.conf]
+        gt_classes = gt_cls.int()
+        detection_classes = detections[:, 5].int()
+        is_obb = detections.shape[1] == 7 and gt_bboxes.shape[1] == 5  # with additional `angle` dimension
+        iou = (
+            batch_probiou(gt_bboxes, torch.cat([detections[:, :4], detections[:, -1:]], dim=-1))
+            if is_obb
+            else box_iou(gt_bboxes, detections[:, :4])
+        )
+
+        x = torch.where(iou > self.iou_thres)
+        if x[0].shape[0]:
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+            if x[0].shape[0] > 1:
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+        else:
+            matches = np.zeros((0, 3))
+
+        n = matches.shape[0] > 0
+        m0, m1, _ = matches.transpose().astype(int)
+        for i, gc in enumerate(gt_classes):
+            j = m0 == i
+            if n and sum(j) == 1:
+                self.matrix[detection_classes[m1[j]], gc] += 1  # correct
+            else:
+                self.matrix[self.nc, gc] += 1  # true background
+
+        for i, dc in enumerate(detection_classes):
+            if not any(m1 == i):
+                self.matrix[dc, self.nc] += 1  # predicted background
+
+    def matrix(self):
+        """Return the confusion matrix."""
+        return self.matrix
+
+    def tp_fp(self):
+        """
+        Return true positives and false positives.
 
         Returns:
-            matplotlib.figure.Figure: The figure object for further manipulation.
+            (tuple): True positives and false positives.
         """
-        fpr, tpr, _, auroc = self.compute_roc_curve()
-        fig = plt.figure()
-        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUROC = {auroc:.2f})')
-        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random Guess')
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('Receiver Operating Characteristic - Object Presence')
-        plt.legend(loc="lower right")
-        plt.grid(True)
-        if save_path:
-            fig.savefig(save_path, dpi=300)
-        self.reset()
-        return fig
+        tp = self.matrix.diagonal()  # true positives
+        fp = self.matrix.sum(1) - tp  # false positives
+        # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
+        return (tp[:-1], fp[:-1]) if self.task == "detect" else (tp, fp)  # remove background class if task=detect
+
+    @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
+    @plt_settings()
+    def plot(self, normalize=True, save_dir="", names=(), on_plot=None):
+        """
+        Plot the confusion matrix using seaborn and save it to a file.
+
+        Args:
+            normalize (bool): Whether to normalize the confusion matrix.
+            save_dir (str): Directory where the plot will be saved.
+            names (tuple): Names of classes, used as labels on the plot.
+            on_plot (func): An optional callback to pass plots path and data when they are rendered.
+        """
+        print(self.matrix)
+        print(self.matrix.shape)
+        import seaborn  # scope for faster 'import ultralytics'
+
+        array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
+        array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
+
+        fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
+        nc, nn = self.nc, len(names)  # number of classes, names
+        seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
+        labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
+        ticklabels = (list(names) + ["background"]) if labels else "auto"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
+            seaborn.heatmap(
+                array,
+                ax=ax,
+                annot=nc < 30,
+                annot_kws={"size": 8},
+                cmap="Blues",
+                fmt=".2f" if normalize else ".0f",
+                square=True,
+                vmin=0.0,
+                xticklabels=ticklabels,
+                yticklabels=ticklabels,
+            ).set_facecolor((1, 1, 1))
+        title = "Confusion Matrix" + " Normalized" * normalize
+        ax.set_xlabel("True")
+        ax.set_ylabel("Predicted")
+        ax.set_title(title)
+        plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
+        fig.savefig(plot_fname, dpi=250)
+        plt.close(fig)
+        if on_plot:
+            on_plot(plot_fname)
+        
+
+    def print(self):
+        """Print the confusion matrix to the console."""
+        for i in range(self.matrix.shape[0]):
+            LOGGER.info(" ".join(map(str, self.matrix[i])))
