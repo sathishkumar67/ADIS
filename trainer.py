@@ -438,9 +438,11 @@ class DetectionTrainer:
 
                 # print validation metrics
                 total_val_loss = self.metrics["val/box_loss"] + self.metrics["val/cls_loss"] + self.metrics["val/dfl_loss"]
-                LOGGER.info(total_val_loss)
-                LOGGER.info(self.fitness)
-                
+                LOGGER.info(f"Epoch {epoch + 1}: AVG Val Box Loss: {self.metrics['val/box_loss']:.4f} | AVG Val Cls Loss: {self.metrics['val/cls_loss']:.4f} | AVG Val DFL Loss: {self.metrics['val/dfl_loss']:.4f} | Total Val Loss: {total_val_loss:.4f}")
+
+                if final_epoch:
+                    self.final_validation_loss = total_val_loss
+                    
                 # Save model
                 if self.args.save or final_epoch:
                     self.save_model()

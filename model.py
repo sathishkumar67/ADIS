@@ -124,6 +124,7 @@ class YOLO11Model(nn.Module):
         self.task = task  # task type
         self.model_name = None  # model name
         model = str(model).strip()
+        self.final_validation_loss = None # validation loss after training
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
         if self.is_hub_model(model):
@@ -808,12 +809,14 @@ class YOLO11Model(nn.Module):
 
         self.trainer.hub_session = self.session  # attach optional HUB session
         self.trainer.train()
+        self.final_validation_loss = self.trainer.final_validation_loss
         # Update model and cfg after training
         if RANK in {-1, 0}:
             ckpt = self.trainer.best if self.trainer.best.exists() else self.trainer.last
             self.model, self.ckpt = attempt_load_one_weight(ckpt)
             self.overrides = self.model.args
             self.metrics = getattr(self.trainer.validator, "metrics", None)  # TODO: no metrics returned by DDP
+            LOGGER.info(f"Validation loss: {self.final_validation_loss:.4f}")
         return self.metrics
 
     def tune(
