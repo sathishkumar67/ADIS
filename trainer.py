@@ -404,6 +404,7 @@ class DetectionTrainer:
                 box_loss_avg = box_loss_cum / batch_count
                 cls_loss_avg = cls_loss_cum / batch_count
                 dfl_loss_avg = dfl_loss_cum / batch_count
+                
 
                 # Log
                 if RANK in {-1, 0}:
@@ -434,6 +435,9 @@ class DetectionTrainer:
                 if self.args.time:
                     self.stop |= (time.time() - self.train_time_start) > (self.args.time * 3600)
 
+                # print validation metrics
+                LOGGER.info(self.metrics)
+                
                 # Save model
                 if self.args.save or final_epoch:
                     self.save_model()
