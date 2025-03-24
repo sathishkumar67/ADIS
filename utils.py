@@ -208,9 +208,9 @@ class AccuracyIoU:
         iou_per_class, acc_per_class = self.get_metrics()
         LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
-            LOGGER.info(f"{key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
+            LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
         # print background class
-        LOGGER.info(f"Background: Accuracy: {acc_per_class['Background']:.3f}")
+        LOGGER.info(f"          Background: Accuracy: {acc_per_class['Background']:.3f}")
         # reset the values
         self.reset()
             
