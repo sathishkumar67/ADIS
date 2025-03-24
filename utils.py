@@ -374,20 +374,7 @@ class AUROC:
             
     def plot_roc_curve(self):
         self.roc_curve_calculation()
-        print(self.overall_results)
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
     
     
     
