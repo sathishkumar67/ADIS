@@ -99,6 +99,7 @@ class DetectionTrainer:
         self.validator = None
         self.metrics = None
         self.plots = {}
+        self.final_validation_loss = 0.0 # needed for bayesian optimization hyperband
         init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic)
 
         # Dirs
@@ -437,6 +438,7 @@ class DetectionTrainer:
 
                 # print validation metrics
                 LOGGER.info(self.metrics)
+                LOGGER.info(self.fitness)
                 
                 # Save model
                 if self.args.save or final_epoch:
