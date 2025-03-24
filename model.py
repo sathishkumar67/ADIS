@@ -816,7 +816,6 @@ class YOLO11Model(nn.Module):
             self.model, self.ckpt = attempt_load_one_weight(ckpt)
             self.overrides = self.model.args
             self.metrics = getattr(self.trainer.validator, "metrics", None)  # TODO: no metrics returned by DDP
-            LOGGER.info(f"Validation loss: {self.final_validation_loss:.4f}")
         return self.metrics
 
     def tune(
