@@ -437,7 +437,8 @@ class DetectionTrainer:
                     self.stop |= (time.time() - self.train_time_start) > (self.args.time * 3600)
 
                 # print validation metrics
-                LOGGER.info(self.metrics)
+                total_val_loss = self.metrics["val/box_loss"] + self.metrics["val/cls_loss"] + self.metrics["val/dfl_loss"]
+                LOGGER.info(total_val_loss)
                 LOGGER.info(self.fitness)
                 
                 # Save model
