@@ -7,9 +7,6 @@ from tqdm import tqdm
 import numpy as np
 from ultralytics.utils import LOGGER
 from ultralytics.utils.metrics import *
-import matplotlib.pyplot as plt
-from sklearn.metrics import auc
-
 
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
