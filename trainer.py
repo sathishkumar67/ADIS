@@ -29,6 +29,7 @@ from ultralytics.utils import (
     emojis,
     yaml_save,
 )
+from ultralytics.utils import TQDM
 from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
 from ultralytics.utils.dist import ddp_cleanup, generate_ddp_command
 from ultralytics.utils.files import get_latest_run
@@ -342,7 +343,7 @@ class DetectionTrainer:
             self.model.train()
             if RANK != -1:
                 self.train_loader.sampler.set_epoch(epoch)
-
+            pbar = enumerate(self.train_loader)
             # Update dataloader attributes (optional)
             if epoch == (self.epochs - self.args.close_mosaic):
                 self._close_dataloader_mosaic()
@@ -354,7 +355,12 @@ class DetectionTrainer:
             cls_loss_cum = 0
             dfl_loss_cum = 0
             batch_count = 0
-            for i, batch in enumerate(self.train_loader):
+            
+            if RANK in {-1, 0}:
+                LOGGER.info(self.progress_string())
+                pbar = TQDM(enumerate(self.train_loader), total=nb) # progress bar
+            
+            for i, batch in pbar:
                 self.run_callbacks("on_train_batch_start")
                 # Warmup
                 ni = i + nb * epoch
@@ -408,7 +414,18 @@ class DetectionTrainer:
                 
 
                 # Log
-                if RANK in {-1, 0}:
+                if RANK in {-1, 0}:  # if verbose
+                    loss_length = self.tloss.shape[0] if len(self.tloss.shape) else 1
+                    pbar.set_description(
+                        ("%11s" * 2 + "%11.4g" * (2 + loss_length))
+                        % (
+                            f"{epoch + 1}/{self.epochs}",
+                            f"{self._get_memory():.3g}G",  # (GB) GPU memory util
+                            *(self.tloss if loss_length > 1 else torch.unsqueeze(self.tloss, 0)),  # losses
+                            batch["cls"].shape[0],  # batch size, i.e. 8
+                            batch["img"].shape[-1],  # imgsz, i.e 640
+                        )
+                    )
                     self.run_callbacks("on_batch_end")
                     if self.args.plots and ni in self.plot_idx:
                         self.plot_training_samples(batch, ni)
