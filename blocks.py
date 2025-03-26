@@ -186,7 +186,6 @@ class Attention(nn.Module):
 
         # Scaled dot-product attention(Flash Attention)
         attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
-        print(attn.shape)
         return self.proj(attn)
 
 
