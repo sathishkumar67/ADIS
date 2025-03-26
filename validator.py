@@ -88,7 +88,7 @@ class DetectionValidator(BaseValidator):
 
     def get_desc(self):
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
+        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "IOU", "Accuracy", "Box(P", "R", "mAP50", "mAP50-95)")
 
     def postprocess(self, preds):
         """Apply Non-maximum suppression to prediction outputs."""
@@ -204,10 +204,11 @@ class DetectionValidator(BaseValidator):
         # Print results per class
         if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
+                iou, acc = self.accuracy_iou.print()
                 LOGGER.info(
-                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
+                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], iou[c], acc[c], *self.metrics.class_result(i))
                 )
-            self.accuracy_iou.print()  # print IoU and accuracy per class
+            # self.accuracy_iou.print()  # print IoU and accuracy per class
         if self.args.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(
