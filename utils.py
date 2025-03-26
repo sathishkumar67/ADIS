@@ -206,15 +206,14 @@ class AccuracyIoU:
     def print(self):
         """Print IoU and accuracy for each class."""
         iou_per_class, acc_per_class = self.get_metrics()
-        # LOGGER.info("Per-class IoU and Accuracy:")
-        # for key, value in iou_per_class.items():
-        #     LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-        # # print background class
-        # LOGGER.info(f"          Background: Accuracy: {acc_per_class['Background']:.3f}")
-        # # reset the values
-        # self.reset()
-        return iou_per_class, acc_per_class
-    
+        LOGGER.info("Per-class IoU and Accuracy:")
+        for key, value in iou_per_class.items():
+            LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
+        # print background class
+        LOGGER.info(f"          Background: Accuracy: {acc_per_class['Background']:.3f}")
+        # reset the values
+        self.reset()
+
     def print_avg(self):
         """Print the average IoU and accuracy across all classes."""
         iou_per_class, acc_per_class = self.get_metrics()
