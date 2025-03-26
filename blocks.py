@@ -1,8 +1,8 @@
 from __future__ import annotations
 import math
-import copy
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from utils import *
 
 
@@ -173,11 +173,19 @@ class Attention(nn.Module):
             [self.key_dim, self.key_dim, self.head_dim], dim=2
         )
 
-        attn = (q.transpose(-2, -1) @ k) * self.scale
-        attn = attn.softmax(dim=-1)
-        x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
-        x = self.proj(x)
-        return x
+        # attn = (q.transpose(-2, -1) @ k) * self.scale
+        # attn = attn.softmax(dim=-1)
+        # x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        # x = self.proj(x)
+        # return x
+
+        q = q.view(B, N, self.num_heads, self.key_dim * 2 + self.head_dim).transpose(1, 2)
+        k = k.view(B, N, self.num_heads, self.key_dim * 2 + self.head_dim).transpose(1, 2)
+        v = v.view(B, N, self.num_heads, self.key_dim * 2 + self.head_dim).transpose(1, 2) 
+        
+        attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        return self.proj(attn)
+
 
 
 class PSABlock(nn.Module):
