@@ -193,7 +193,6 @@ class AccuracyIoU:
         """
         iou_per_class = {}
         acc_per_class = {}
-        acc_per_class["Background"] = self.tn_predicted_background / (self.tn_predicted_background + self.fn_predicted_background) if self.tn_predicted_background + self.fn_predicted_background > 0 else 0.0
 
         total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
         
@@ -209,8 +208,7 @@ class AccuracyIoU:
         LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
             LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-        # print background class
-        LOGGER.info(f"          Background: Accuracy: {acc_per_class['Background']:.3f}")
+
         # reset the values
         self.reset()
 
