@@ -173,6 +173,7 @@ class Attention(nn.Module):
             [self.key_dim, self.key_dim, self.head_dim], dim=2
         )
 
+        # Original implementation
         # attn = (q.transpose(-2, -1) @ k) * self.scale
         # attn = attn.softmax(dim=-1)
         # x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
@@ -183,17 +184,10 @@ class Attention(nn.Module):
         k = k.transpose(-2, -1)
         v = v.transpose(-2, -1)
 
-        print(q.shape)
-        print(k.shape)
-        print(v.shape)
+        # Scaled dot-product attention(Flash Attention)
         attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        print(attn.shape)
         return self.proj(attn)
-        
-        # torch.Size([1, 2, 32, 64])
-        # torch.Size([1, 2, 32, 64])
-        # torch.Size([1, 2, 64, 64])
-        # torch.Size([1, 256, 8, 8])
-
 
 
 class PSABlock(nn.Module):
