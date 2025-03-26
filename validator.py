@@ -206,7 +206,7 @@ class DetectionValidator(BaseValidator):
             for i, c in enumerate(self.metrics.ap_class_index):
                 iou, acc = self.accuracy_iou.print()
                 LOGGER.info(
-                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], iou[i], acc[i], *self.metrics.class_result(i))
+                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], f"{iou[i]}", f"{acc[i]}", *self.metrics.class_result(i))
                 )
             # self.accuracy_iou.print()  # print IoU and accuracy per class
         if self.args.plots:
