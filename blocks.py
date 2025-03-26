@@ -179,18 +179,20 @@ class Attention(nn.Module):
         # x = self.proj(x)
         # return x
         
+        q = q.transpose(-2, -1)
+        k = k.transpose(-2, -1)
+        v = v.transpose(-2, -1)
+
         print(q.shape)
         print(k.shape)
         print(v.shape)
-        print(qkv.shape)
-        return 
-
-        # q = q.view(B, N, self.num_heads, self.key_dim * 2 + self.head_dim).transpose(1, 2)
-        # k = k.view(B, N, self.num_heads, self.key_dim * 2 + self.head_dim).transpose(1, 2)
-        # v = v.view(B, N, self.num_heads, self.key_dim * 2 + self.head_dim).transpose(1, 2) 
+        attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        return self.proj(attn)
         
-        # attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
-        # return self.proj(attn)
+        # torch.Size([1, 2, 32, 64])
+        # torch.Size([1, 2, 32, 64])
+        # torch.Size([1, 2, 64, 64])
+        # torch.Size([1, 256, 8, 8])
 
 
 
