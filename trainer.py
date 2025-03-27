@@ -119,7 +119,6 @@ class DetectionTrainer:
         self.start_epoch = 0
         self.bohb = bohb
         if self.bohb and custom_callbacks:
-            print("Using Custom Callbacks for BOHB Optimization........................................")
             self.custom_callbacks = custom_callbacks
         
         if RANK == -1:
@@ -467,7 +466,6 @@ class DetectionTrainer:
 
                 # pass intermediate results to BOHB
                 if self.bohb and self.custom_callbacks:
-                    print(round(total_val_loss, 6))
                     self.custom_callbacks["on_train_epoch_end"](round(total_val_loss, 6), epoch + 1)
                 
                 if final_epoch:
