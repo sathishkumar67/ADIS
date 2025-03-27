@@ -100,7 +100,7 @@ class DetectionTrainer:
         self.validator = None
         self.metrics = None
         self.plots = {}
-        self.final_validation_loss = 0.0 # needed for bayesian optimization hyperband
+        self.score = 0.0 # needed for bayesian optimization hyperband
         init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic)
 
         # Dirs
@@ -466,10 +466,10 @@ class DetectionTrainer:
 
                 # pass intermediate results to BOHB
                 if self.bohb and self.custom_callbacks:
-                    self.custom_callbacks["on_train_epoch_end"](round(total_val_loss, 6), epoch + 1)
+                    self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 3), epoch + 1)
                 
                 if final_epoch:
-                    self.final_validation_loss = total_val_loss
+                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 3)
                     
                 # Save model
                 if self.args.save or final_epoch:

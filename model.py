@@ -123,7 +123,7 @@ class YOLO11Model(nn.Module):
         self.task = task  # task type
         self.model_name = None  # model name
         model = str(model).strip()
-        self.final_validation_loss = None # validation loss after training
+        self.score = None # score after training
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
         if self.is_hub_model(model):
@@ -809,7 +809,7 @@ class YOLO11Model(nn.Module):
 
         self.trainer.hub_session = self.session  # attach optional HUB session
         self.trainer.train()
-        self.final_validation_loss = self.trainer.final_validation_loss
+        self.score = self.trainer.score
         # Update model and cfg after training
         if RANK in {-1, 0}:
             ckpt = self.trainer.best if self.trainer.best.exists() else self.trainer.last
