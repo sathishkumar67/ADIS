@@ -233,7 +233,7 @@ class DetectionTrainer:
         # Model
         self.run_callbacks("on_pretrain_routine_start")
         ckpt = self.setup_model()
-        self.model = self.model.to(torch.bfloat16).to(self.device)
+        self.model = self.model.to(torch.float16).to(self.device)
         self.set_model_attributes()
 
         # Freeze layers
