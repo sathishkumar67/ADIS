@@ -2,7 +2,7 @@ import subprocess
 import os
 
 # Number of GPUs available
-n_gpus = 4  # Adjust based on your system
+n_gpus = 2  # Adjust based on your system
 
 # List to store subprocesses
 processes = []
