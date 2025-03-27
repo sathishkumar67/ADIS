@@ -109,8 +109,9 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(nc)}    # False positives per class
         self.class_fn = {i: 0 for i in range(nc)}    # False negatives per class
         self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
-        self.tn_predicted_background = 0             # Total true negatives predicted(background)
-        self.fn_predicted_background = 0             # Total false negatives predicted(background)   
+        self.true_negative = 0             # Total true negatives predicted(background)
+        self.false_negative = 0             # Total false negatives predicted(background)  
+        self.total_negatives = 0                      # Total negatives 
 
     def process_batch(self, detections, gt_bboxes, gt_cls):
         """
@@ -124,19 +125,22 @@ class AccuracyIoU:
         
         if detections is None:
             if gt_cls.shape[0] != 0:
-                self.fn_predicted_background += 1  # No detections, objects present: FN
+                self.false_negative += 1  # No detections, objects present: FN
             else:
-                self.tn_predicted_background += 1  # No detections, no objects: TN
+                self.true_negative += 1  # No detections, no objects: TN
+                self.total_negatives += 1
         else:
             # Filter detections by confidence
             detections = detections[detections[:, 4] > self.conf]
             if gt_cls.shape[0] == 0:
                 if detections.shape[0] == 0:
-                    self.tn_predicted_background += 1  # No detections, no objects: TN
+                    self.true_negative += 1  # No detections, no objects: TN
+                    self.total_negatives += 1
                 else:
                     # Detections, no objects: FP
                     # Update class_fp for unmatched detections
                     detection_classes = detections[:, 5].int().cpu().numpy()
+                    self.total_negatives += 1
                     for dc in detection_classes:
                         self.class_fp[dc] += 1
             else:
@@ -195,7 +199,7 @@ class AccuracyIoU:
         acc_per_class = {}
 
         total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
-        
+        acc_per_class["background"] = (self.true_negative / self.total_negatives) if self.total_negatives > 0 else 0.0
         for cls in range(self.nc):
             iou_per_class[self.class_names[cls]] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
             acc_per_class[self.class_names[cls]] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
@@ -211,13 +215,6 @@ class AccuracyIoU:
 
         # reset the values
         self.reset()
-
-    def print_avg(self):
-        """Print the average IoU and accuracy across all classes."""
-        iou_per_class, acc_per_class = self.get_metrics()
-        avg_iou = sum(iou_per_class.values()) / self.nc if sum(iou_per_class.values()) > 0.0 else 0.0
-        avg_acc = sum(acc_per_class.values()) / self.nc if sum(acc_per_class.values()) > 0.0 else 0.0
-        LOGGER.info(f"Average IoU : {avg_iou:.3f} | Average Accuracy: {avg_acc:.3f}")
         
     def reset(self):
         self.class_iou = {i: 0.0 for i in range(self.nc)}
@@ -225,153 +222,155 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(self.nc)}
         self.class_fn = {i: 0 for i in range(self.nc)}
         self.class_gt = {i: 0 for i in range(self.nc)}
-        self.tn_predicted_background = 0
-        self.fn_predicted_background = 0
+        self.true_negative = 0
+        self.total_negatives = 0
+        self.false_negative = 0
         
         
-class AUROC:
-    """
-    A class for calculating and updating a confusion matrix for object detection and classification tasks.
+        
+# class AUROC:
+#     """
+#     A class for calculating and updating a confusion matrix for object detection and classification tasks.
 
-    Attributes:
-        task (str): The type of task, either 'detect' or 'classify'.
-        matrix (np.ndarray): The confusion matrix, with dimensions depending on the task.
-        nc (int): The number of classes.
-        conf (float): The confidence threshold for detections.
-        iou_thres (float): The Intersection over Union threshold.
-    """
+#     Attributes:
+#         task (str): The type of task, either 'detect' or 'classify'.
+#         matrix (np.ndarray): The confusion matrix, with dimensions depending on the task.
+#         nc (int): The number of classes.
+#         conf (float): The confidence threshold for detections.
+#         iou_thres (float): The Intersection over Union threshold.
+#     """
 
-    def __init__(self, nc, class_names, iou_thres=0.45, task="detect"):
-        """
-        Initialize a ConfusionMatrix instance.
+#     def __init__(self, nc, class_names, iou_thres=0.45, task="detect"):
+#         """
+#         Initialize a ConfusionMatrix instance.
 
-        Args:
-            nc (int): Number of classes.
-            conf (float, optional): Confidence threshold for detections.
-            iou_thres (float, optional): IoU threshold for matching detections to ground truth.
-            task (str, optional): Type of task, either 'detect' or 'classify'.
-        """
-        self.task = task
-        self.nc = nc  # number of classes
-        self.class_names = class_names
-        self.iou_thres = iou_thres # IoU threshold
-        self.matrix = np.zeros((nc + 1, nc + 1))     # confusion matrix 
-        self.overall_results = {}
-        self.detections = []
-        self.gt_bboxes = []
-        self.gt_cls = []
+#         Args:
+#             nc (int): Number of classes.
+#             conf (float, optional): Confidence threshold for detections.
+#             iou_thres (float, optional): IoU threshold for matching detections to ground truth.
+#             task (str, optional): Type of task, either 'detect' or 'classify'.
+#         """
+#         self.task = task
+#         self.nc = nc  # number of classes
+#         self.class_names = class_names
+#         self.iou_thres = iou_thres # IoU threshold
+#         self.matrix = np.zeros((nc + 1, nc + 1))     # confusion matrix 
+#         self.overall_results = {}
+#         self.detections = []
+#         self.gt_bboxes = []
+#         self.gt_cls = []
         
 
-    def process_batch(self, detections, gt_bboxes, gt_cls, conf):
-        """
-        Update confusion matrix for object detection task.
+#     def process_batch(self, detections, gt_bboxes, gt_cls, conf):
+#         """
+#         Update confusion matrix for object detection task.
 
-        Args:
-            detections (Array[N, 6] | Array[N, 7]): Detected bounding boxes and their associated information.
-                                      Each row should contain (x1, y1, x2, y2, conf, class)
-                                      or with an additional element `angle` when it's obb.
-            gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
-            gt_cls (Array[M]): The class labels.
-        """
-        if gt_cls.shape[0] == 0:  # Check if labels is empty
-            if detections is not None:
-                detections = detections[detections[:, 4] > conf]
-                detection_classes = detections[:, 5].int()
-                for dc in detection_classes:
-                    self.matrix[dc, self.nc] += 1  # false positives
-            return
-        if detections is None:
-            gt_classes = gt_cls.int()
-            for gc in gt_classes:
-                self.matrix[self.nc, gc] += 1  # background FN
-            return
+#         Args:
+#             detections (Array[N, 6] | Array[N, 7]): Detected bounding boxes and their associated information.
+#                                       Each row should contain (x1, y1, x2, y2, conf, class)
+#                                       or with an additional element `angle` when it's obb.
+#             gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
+#             gt_cls (Array[M]): The class labels.
+#         """
+#         if gt_cls.shape[0] == 0:  # Check if labels is empty
+#             if detections is not None:
+#                 detections = detections[detections[:, 4] > conf]
+#                 detection_classes = detections[:, 5].int()
+#                 for dc in detection_classes:
+#                     self.matrix[dc, self.nc] += 1  # false positives
+#             return
+#         if detections is None:
+#             gt_classes = gt_cls.int()
+#             for gc in gt_classes:
+#                 self.matrix[self.nc, gc] += 1  # background FN
+#             return
 
-        detections = detections[detections[:, 4] > conf]
-        gt_classes = gt_cls.int()
-        detection_classes = detections[:, 5].int()
-        is_obb = detections.shape[1] == 7 and gt_bboxes.shape[1] == 5  # with additional `angle` dimension
-        iou = (
-            batch_probiou(gt_bboxes, torch.cat([detections[:, :4], detections[:, -1:]], dim=-1))
-            if is_obb
-            else box_iou(gt_bboxes, detections[:, :4])
-        )
+#         detections = detections[detections[:, 4] > conf]
+#         gt_classes = gt_cls.int()
+#         detection_classes = detections[:, 5].int()
+#         is_obb = detections.shape[1] == 7 and gt_bboxes.shape[1] == 5  # with additional `angle` dimension
+#         iou = (
+#             batch_probiou(gt_bboxes, torch.cat([detections[:, :4], detections[:, -1:]], dim=-1))
+#             if is_obb
+#             else box_iou(gt_bboxes, detections[:, :4])
+#         )
 
-        x = torch.where(iou > self.iou_thres)
-        if x[0].shape[0]:
-            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
-            if x[0].shape[0] > 1:
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-        else:
-            matches = np.zeros((0, 3))
+#         x = torch.where(iou > self.iou_thres)
+#         if x[0].shape[0]:
+#             matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+#             if x[0].shape[0] > 1:
+#                 matches = matches[matches[:, 2].argsort()[::-1]]
+#                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+#                 matches = matches[matches[:, 2].argsort()[::-1]]
+#                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+#         else:
+#             matches = np.zeros((0, 3))
 
-        n = matches.shape[0] > 0
-        m0, m1, _ = matches.transpose().astype(int)
-        for i, gc in enumerate(gt_classes):
-            j = m0 == i
-            if n and sum(j) == 1:
-                self.matrix[detection_classes[m1[j]], gc] += 1  # correct
-            else:
-                self.matrix[self.nc, gc] += 1  # true background
+#         n = matches.shape[0] > 0
+#         m0, m1, _ = matches.transpose().astype(int)
+#         for i, gc in enumerate(gt_classes):
+#             j = m0 == i
+#             if n and sum(j) == 1:
+#                 self.matrix[detection_classes[m1[j]], gc] += 1  # correct
+#             else:
+#                 self.matrix[self.nc, gc] += 1  # true background
 
-        for i, dc in enumerate(detection_classes):
-            if not any(m1 == i):
-                self.matrix[dc, self.nc] += 1  # predicted background
+#         for i, dc in enumerate(detection_classes):
+#             if not any(m1 == i):
+#                 self.matrix[dc, self.nc] += 1  # predicted background
 
-    def calculate_metrics(self, matrix):
-        # Number of classes (e.g., 12 for a 12x12 confusion matrix)
-        N = len(matrix)
+#     def calculate_metrics(self, matrix):
+#         # Number of classes (e.g., 12 for a 12x12 confusion matrix)
+#         N = len(matrix)
         
-        # Compute the sum of each row (actual class totals)
-        row_sums = [sum(matrix[i]) for i in range(N)]
+#         # Compute the sum of each row (actual class totals)
+#         row_sums = [sum(matrix[i]) for i in range(N)]
         
-        # Compute the sum of each column (predicted class totals)
-        col_sums = [sum(matrix[i][j] for i in range(N)) for j in range(N)]
+#         # Compute the sum of each column (predicted class totals)
+#         col_sums = [sum(matrix[i][j] for i in range(N)) for j in range(N)]
         
-        # Compute the total sum of all elements in the confusion matrix
-        total_sum = sum(row_sums)
+#         # Compute the total sum of all elements in the confusion matrix
+#         total_sum = sum(row_sums)
         
-        # Initialize the results dictionary
-        results = {}
+#         # Initialize the results dictionary
+#         results = {}
         
-        # Calculate metrics for each class
-        for i in range(N):
-            # True Positives: correctly predicted instances for class i
-            TP = matrix[i][i]
+#         # Calculate metrics for each class
+#         for i in range(N):
+#             # True Positives: correctly predicted instances for class i
+#             TP = matrix[i][i]
             
-            # False Positives: instances predicted as class i but belong to other classes
-            FP = col_sums[i] - TP
+#             # False Positives: instances predicted as class i but belong to other classes
+#             FP = col_sums[i] - TP
             
-            # False Negatives: instances of class i predicted as other classes
-            FN = row_sums[i] - TP
+#             # False Negatives: instances of class i predicted as other classes
+#             FN = row_sums[i] - TP
             
-            # True Negatives: instances not of class i and not predicted as class i
-            TN = total_sum - row_sums[i] - col_sums[i] + TP
+#             # True Negatives: instances not of class i and not predicted as class i
+#             TN = total_sum - row_sums[i] - col_sums[i] + TP
             
-            # Store the metrics in the dictionary with class i as the key
-            results[i] = {'TP': TP, 'FP': FP, 'TN': TN, 'FN': FN}
+#             # Store the metrics in the dictionary with class i as the key
+#             results[i] = {'TP': TP, 'FP': FP, 'TN': TN, 'FN': FN}
         
-        # Return the dictionary containing metrics for all classes
-        return results
+#         # Return the dictionary containing metrics for all classes
+#         return results
     
-    def aggregate_batches(self, detections, gt_bboxes, gt_cls):
-        self.detections.append(detections)
-        self.gt_bboxes.append(gt_bboxes)
-        self.gt_cls.append(gt_cls)
+#     def aggregate_batches(self, detections, gt_bboxes, gt_cls):
+#         self.detections.append(detections)
+#         self.gt_bboxes.append(gt_bboxes)
+#         self.gt_cls.append(gt_cls)
     
-    def roc_curve_calculation(self):
-        thresholds = [1.0, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20, 0.10, 0.0]
-        for current_confidence in thresholds:
-            self.matrix = np.zeros((self.nc + 1, self.nc + 1))     # confusion matrix
-            for detections, gt_bboxes, gt_cls in zip(self.detections, self.gt_bboxes, self.gt_cls):
-                self.process_batch(detections, gt_bboxes, gt_cls, current_confidence)
-            results = self.calculate_metrics(self.matrix)
-            self.overall_results[current_confidence] = results
+#     def roc_curve_calculation(self):
+#         thresholds = [1.0, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20, 0.10, 0.0]
+#         for current_confidence in thresholds:
+#             self.matrix = np.zeros((self.nc + 1, self.nc + 1))     # confusion matrix
+#             for detections, gt_bboxes, gt_cls in zip(self.detections, self.gt_bboxes, self.gt_cls):
+#                 self.process_batch(detections, gt_bboxes, gt_cls, current_confidence)
+#             results = self.calculate_metrics(self.matrix)
+#             self.overall_results[current_confidence] = results
             
-    def plot_roc_curve(self):
-        self.roc_curve_calculation()
+#     def plot_roc_curve(self):
+#         self.roc_curve_calculation()
 
     
     
