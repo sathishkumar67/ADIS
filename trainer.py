@@ -467,8 +467,7 @@ class DetectionTrainer:
 
                 # pass intermediate results to BOHB
                 if self.bohb and self.custom_callbacks:
-                    print(f"passing values to BOHB: {total_val_loss}, {epoch + 1}")
-                    self.custom_callbacks["on_train_epoch_end"](total_val_loss, epoch + 1)
+                    self.custom_callbacks["on_train_epoch_end"](round(total_val_loss, 6), epoch + 1)
                 
                 if final_epoch:
                     self.final_validation_loss = total_val_loss
