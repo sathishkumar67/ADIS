@@ -466,10 +466,10 @@ class DetectionTrainer:
 
                 # pass intermediate results to BOHB
                 if self.bohb and self.custom_callbacks:
-                    self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 3), epoch + 1)
+                    self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 4), epoch + 1)
                 
                 if final_epoch:
-                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 3)
+                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 4)
                     
                 # Save model
                 if self.args.save or final_epoch:
