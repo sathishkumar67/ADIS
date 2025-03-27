@@ -86,7 +86,7 @@ class DetectionTrainer:
         csv (Path): Path to results CSV file.
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None, bohb=True, custom_callbacks=None):
+    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None, bohb=False, custom_callbacks=None):
         """
         Initializes the Trainer class.
 

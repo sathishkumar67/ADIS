@@ -84,7 +84,8 @@ class YOLO11Model(nn.Module):
         model: Union[str, Path] = "yolo11n.pt",
         task: str = "detect",
         verbose: bool = True,
-    ) -> None:
+        bohb: bool = True,
+        custom_callbacks: Dict[str, Any] = None) -> None:
         """
         Initializes a new instance of the YOLO model class.
 
@@ -125,6 +126,8 @@ class YOLO11Model(nn.Module):
         self.model_name = None  # model name
         model = str(model).strip()
         self.final_validation_loss = None # validation loss after training
+        self.bohb = bohb
+        self.custom_callbacks = custom_callbacks
 
         # Check if Ultralytics HUB model from https://hub.ultralytics.com
         if self.is_hub_model(model):
@@ -802,7 +805,7 @@ class YOLO11Model(nn.Module):
         if args.get("resume"):
             args["resume"] = self.ckpt_path
 
-        self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks)
+        self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks, bohb=self.bohb, custom_callbacks=self.custom_callbacks)
         if not args.get("resume"):  # manually set model only if not resuming
             self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml)
             self.model = self.trainer.model
