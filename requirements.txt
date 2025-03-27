@@ -1,4 +1,4 @@
 ultralytics
 albumentations
-hpbandster
-ConfigSpace
+optuna 
+huggingface_hub
