@@ -26,8 +26,8 @@ MODEL_PATH = "yolo11n.pt"
 
 
 # download the dataset and unzip it
-hf_hub_download(repo_id=REPO_ID, filename=FILENAME_IN_REPO, repo_type=REPO_TYPE, local_dir=LOCAL_DIR)
-unzip_file(DATASET_PATH, LOCAL_DIR)
+# hf_hub_download(repo_id=REPO_ID, filename=FILENAME_IN_REPO, repo_type=REPO_TYPE, local_dir=LOCAL_DIR)
+# unzip_file(DATASET_PATH, LOCAL_DIR)
 
 
 # Get the number of CPU cores
