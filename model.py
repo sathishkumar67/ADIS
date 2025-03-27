@@ -84,7 +84,7 @@ class YOLO11Model(nn.Module):
         model: Union[str, Path] = "yolo11n.pt",
         task: str = "detect",
         verbose: bool = True,
-        bohb: bool = True,
+        bohb: bool = False,
         custom_callbacks: Dict[str, Any] = None) -> None:
         """
         Initializes a new instance of the YOLO model class.
