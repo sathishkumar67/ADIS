@@ -86,7 +86,7 @@ class DetectionTrainer:
         csv (Path): Path to results CSV file.
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
+    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None, bohb=True, custom_callbacks=None):
         """
         Initializes the Trainer class.
 
@@ -117,6 +117,11 @@ class DetectionTrainer:
         self.batch_size = self.args.batch
         self.epochs = self.args.epochs or 100  # in case users accidentally pass epochs=None with timed training
         self.start_epoch = 0
+        self.bohb = bohb
+        if self.bohb and custom_callbacks:
+            print("Using Custom Callbacks for BOHB Optimization........................................")
+            self.custom_callbacks = custom_callbacks
+        
         if RANK == -1:
             print_args(vars(self.args))
 
@@ -460,6 +465,10 @@ class DetectionTrainer:
                 LOGGER.info("\n")
                 LOGGER.info("\n")
 
+                # pass intermediate results to BOHB
+                if self.bohb and self.custom_callbacks:
+                    self.custom_callbacks["on_train_epoch_end"](total_val_loss)
+                
                 if final_epoch:
                     self.final_validation_loss = total_val_loss
                     
