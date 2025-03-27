@@ -1,9 +1,10 @@
 from __future__ import annotations
 import os
+import joblib
 import optuna
-from huggingface_hub import hf_hub_download
 from optuna.study import MaxTrialsCallback
 from optuna.trial import TrialState
+from huggingface_hub import hf_hub_download
 from utils import unzip_file
 from model import YOLO11Model
 
@@ -109,3 +110,5 @@ study.optimize(
     n_trials=NUM_TRIALS,
     callbacks=[MaxTrialsCallback(NUM_TRIALS, states=(TrialState.COMPLETE,))]
 )
+
+joblib.dump(study, "optuna_study.pkl")
