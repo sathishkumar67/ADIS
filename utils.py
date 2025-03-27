@@ -212,7 +212,7 @@ class AccuracyIoU:
         LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
             LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-        LOGGER.info(f"Background Accuracy: {acc_per_class['background']:.3f}")
+        LOGGER.info(f"          Background Accuracy: {acc_per_class['background']:.3f}")
 
         # reset the values
         self.reset()
