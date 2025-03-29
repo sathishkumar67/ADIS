@@ -81,7 +81,7 @@ class DetectionValidator(BaseValidator):
         self.metrics.plot = self.args.plots
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.accuracy_iou = AccuracyIoU(class_names=self.names, nc=self.nc, conf=self.args.conf)
-        self.auroc = AUROC()
+        # self.auroc = AUROC()
         self.seen = 0
         self.jdict = []
         self.stats = dict(tp=[], conf=[], pred_cls=[], target_cls=[], target_img=[])
@@ -161,7 +161,7 @@ class DetectionValidator(BaseValidator):
                 stat["tp"] = self._process_batch(predn, bbox, cls)
                 # calculate IoU and accuracy
                 self.accuracy_iou.process_batch(predn, bbox, cls)
-                self.auroc.process_batch(predn)
+                # self.auroc.process_batch(predn)
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bbox, cls)
             for k in self.stats.keys():
@@ -212,7 +212,7 @@ class DetectionValidator(BaseValidator):
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir, names=self.names.values(), normalize=normalize, on_plot=self.on_plot
                 )
-        self.auroc.plot_roc_curve()
+        # self.auroc.plot_roc_curve()
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
