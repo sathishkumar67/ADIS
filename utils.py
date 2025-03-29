@@ -122,7 +122,7 @@ class AccuracyIoU:
             gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
             gt_cls (torch.Tensor[M]): Ground truth class labels.
         """
-        
+        print(detections.shape)
         if detections is None:
             if gt_cls.shape[0] != 0:
                 self.false_negative += 1  # No detections, objects present: FN
@@ -274,7 +274,7 @@ class AUROC:
         import matplotlib.pyplot as plt
         from sklearn.metrics import roc_curve
         self.target = np.ones(len(self.accumulate_confidence_scores))
-        self.prediction = np.array(self.accumulate_confidence_scores)
+        self.prediction = np.array(self.accumulate_confidence_scores.cpu())
         fpr, tpr, thresholds = roc_curve(self.target, self.prediction)
         # Plot ROC curve and AUC
         plt.figure(figsize=(8, 6))
