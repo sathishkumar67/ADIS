@@ -213,6 +213,10 @@ class AccuracyIoU:
         for key, value in iou_per_class.items():
             LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
         LOGGER.info(f"          Background Accuracy: {acc_per_class['background']:.3f}")
+        # print tpr and fpr
+        tp = sum(self.class_tp.values())
+        fn = sum(self.class_fn.values())
+        LOGGER.info(f"TPR: {tp / (tp + fn):.3f}")
 
         # reset the values
         self.reset()
