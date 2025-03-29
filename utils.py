@@ -122,7 +122,6 @@ class AccuracyIoU:
             gt_bboxes (torch.Tensor[M, 4]): Ground truth boxes in xyxy format.
             gt_cls (torch.Tensor[M]): Ground truth class labels.
         """
-        print(detections.shape)
         if detections is None:
             if gt_cls.shape[0] != 0:
                 self.false_negative += 1  # No detections, objects present: FN
