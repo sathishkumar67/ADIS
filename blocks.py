@@ -23,13 +23,11 @@ class Conv(nn.Module):
         """Apply convolution and activation without batch normalization."""
         return self.act(self.conv(x))
 
-
 class DWConv(Conv):
     """Depth-wise convolution."""
     def __init__(self, c1, c2, k=1, s=1, d=1, act=True):  # ch_in, ch_out, kernel, stride, dilation, activation
         """Initialize Depth-wise convolution with given parameters."""
         super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
-
 
 class Bottleneck(nn.Module):
     """Standard bottleneck."""
@@ -145,16 +143,8 @@ class Attention(nn.Module):
         proj (Conv): Convolutional layer for projecting the attended values.
         pe (Conv): Convolutional layer for positional encoding.
     """
-
     def __init__(self, dim, num_heads=8, attn_ratio=0.5):
-        """
-        Initialize multi-head attention module.
-
-        Args:
-            dim (int): Input dimension.
-            num_heads (int): Number of attention heads.
-            attn_ratio (float): Attention ratio for key dimension.
-        """
+        """Initializes multi-head attention module with query, key, and value convolutions and positional encoding."""
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
@@ -183,11 +173,20 @@ class Attention(nn.Module):
             [self.key_dim, self.key_dim, self.head_dim], dim=2
         )
 
-        attn = (q.transpose(-2, -1) @ k) * self.scale
-        attn = attn.softmax(dim=-1)
-        x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
-        x = self.proj(x)
-        return x
+        # Original implementation
+        # attn = (q.transpose(-2, -1) @ k) * self.scale
+        # attn = attn.softmax(dim=-1)
+        # x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        # x = self.proj(x)
+        # return x
+        
+        q = q.transpose(-2, -1)
+        k = k.transpose(-2, -1)
+        v = v.transpose(-2, -1)
+
+        # Scaled dot-product attention(Flash Attention)
+        attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        return self.proj(attn)
 
 
 class PSABlock(nn.Module):
