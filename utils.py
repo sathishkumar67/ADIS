@@ -253,7 +253,6 @@ class AUROC:
         """
         self.task = task
         self.accumulate_confidence_scores = []
-        self.detections = []
 
     def process_batch(self, detections):
         """
