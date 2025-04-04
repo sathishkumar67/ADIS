@@ -10,7 +10,7 @@ from ultralytics.utils import LOGGER, ops
 from ultralytics.utils.checks import check_requirements
 from ultralytics.utils.metrics import  DetMetrics, box_iou, ConfusionMatrix
 from ultralytics.utils.plotting import output_to_target, plot_images
-from utils import AccuracyIoU, AUROC
+from utils import AccuracyIoU
 
 
 class DetectionValidator(BaseValidator):
