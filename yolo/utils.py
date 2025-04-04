@@ -6,7 +6,7 @@ import math
 from tqdm import tqdm
 import numpy as np
 from ultralytics.utils import LOGGER
-from ultralytics.utils.metrics import *
+from ultralytics.utils.metrics import box_iou
 
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation

@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import *
+from utils import autopad, dist2bbox, make_anchors
 
 
 class Conv(nn.Module):
