@@ -218,6 +218,3 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(self.nc)}
         self.class_fn = {i: 0 for i in range(self.nc)}
         self.class_gt = {i: 0 for i in range(self.nc)}
-        self.true_negative = 0
-        self.total_negatives = 0
-        self.false_negative = 0
