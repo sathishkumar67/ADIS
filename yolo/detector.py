@@ -13,8 +13,8 @@ from ultralytics.utils.torch_utils import (
     time_sync,
 )
 from ultralytics.nn.tasks import yaml_model_load, TorchVision, Index
-from utils import make_divisible
-from blocks import *
+from .utils import make_divisible
+from .blocks import *
 try:
     import thop
 except ImportError:
