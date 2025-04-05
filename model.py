@@ -27,9 +27,9 @@ from ultralytics.utils import (
     yaml_load,
 )
 from ultralytics.models.yolo.detect import DetectionPredictor
-from .detector import DetectionModel
-from .trainer import DetectionTrainer
-from .validator import DetectionValidator
+from detector import DetectionModel
+from trainer import DetectionTrainer
+from validator import DetectionValidator
 
 
 

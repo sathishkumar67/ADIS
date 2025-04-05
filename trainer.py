@@ -47,8 +47,8 @@ from ultralytics.utils.torch_utils import (
     unset_deterministic,
     de_parallel
 )
-from .validator import DetectionValidator
-from .detector import DetectionModel
+from validator import DetectionValidator
+from detector import DetectionModel
 
 
 class DetectionTrainer:

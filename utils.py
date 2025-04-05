@@ -6,7 +6,7 @@ import math
 from tqdm import tqdm
 import numpy as np
 from ultralytics.utils import LOGGER
-from ultralytics.utils.metrics import box_iou
+from ultralytics.utils.metrics import *
 
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -109,6 +109,9 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(nc)}    # False positives per class
         self.class_fn = {i: 0 for i in range(nc)}    # False negatives per class
         self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
+        self.true_negative = 0             # Total true negatives predicted(background)
+        self.false_negative = 0             # Total false negatives predicted(background)  
+        self.total_negatives = 0                      # Total negatives 
 
     def process_batch(self, detections, gt_bboxes, gt_cls):
         """
@@ -121,19 +124,22 @@ class AccuracyIoU:
         """
         if detections is None:
             if gt_cls.shape[0] != 0:
-                return 
+                self.false_negative += 1  # No detections, objects present: FN
             else:
-                return
+                self.true_negative += 1  # No detections, no objects: TN
+                self.total_negatives += 1
         else:
             # Filter detections by confidence
             detections = detections[detections[:, 4] > self.conf]
             if gt_cls.shape[0] == 0:
                 if detections.shape[0] == 0:
-                    return
+                    self.true_negative += 1  # No detections, no objects: TN
+                    self.total_negatives += 1
                 else:
                     # Detections, no objects: FP
                     # Update class_fp for unmatched detections
                     detection_classes = detections[:, 5].int().cpu().numpy()
+                    self.total_negatives += 1
                     for dc in detection_classes:
                         self.class_fp[dc] += 1
             else:
@@ -192,6 +198,7 @@ class AccuracyIoU:
         acc_per_class = {}
 
         total = {i: self.class_tp[i] + self.class_fn[i] + self.class_fp[i] for i in range(self.nc)}
+        acc_per_class["background"] = (self.true_negative / self.total_negatives) if self.total_negatives > 0 else 0.0
         for cls in range(self.nc):
             iou_per_class[self.class_names[cls]] = (self.class_iou[cls] / self.class_tp[cls]) if self.class_tp[cls] > 0 else 0.0
             acc_per_class[self.class_names[cls]] = (self.class_tp[cls] / total[cls]) if total[cls] > 0 else 0.0
@@ -204,6 +211,7 @@ class AccuracyIoU:
         LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
             LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
+        LOGGER.info(f"          Background Accuracy: {acc_per_class['background']:.3f}")
         # print tpr and fpr
         tp = sum(self.class_tp.values())
         fn = sum(self.class_fn.values())
@@ -218,3 +226,121 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(self.nc)}
         self.class_fn = {i: 0 for i in range(self.nc)}
         self.class_gt = {i: 0 for i in range(self.nc)}
+        self.true_negative = 0
+        self.total_negatives = 0
+        self.false_negative = 0
+        
+        
+        
+class AUROC:
+    """
+    A class for calculating and updating a confusion matrix for object detection and classification tasks.
+
+    Attributes:
+        task (str): The type of task, either 'detect' or 'classify'.
+        matrix (np.ndarray): The confusion matrix, with dimensions depending on the task.
+        nc (int): The number of classes.
+        conf (float): The confidence threshold for detections.
+        iou_thres (float): The Intersection over Union threshold.
+    """
+
+    def __init__(self, task="detect"):
+        """
+        Initialize a ConfusionMatrix instance.
+
+        Args:
+            nc (int): Number of classes.
+            conf (float, optional): Confidence threshold for detections.
+            iou_thres (float, optional): IoU threshold for matching detections to ground truth.
+            task (str, optional): Type of task, either 'detect' or 'classify'.
+        """
+        self.task = task
+        self.accumulate_confidence_scores = []
+
+    def process_batch(self, detections):
+        """
+        Update confusion matrix for object detection task.
+
+        Args:
+            detections (Array[N, 6] | Array[N, 7]): Detected bounding boxes and their associated information.
+                                      Each row should contain (x1, y1, x2, y2, conf, class)
+                                      or with an additional element `angle` when it's obb.
+            gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
+            gt_cls (Array[M]): The class labels.
+        """
+        if detections is None:
+            return
+
+        self.accumulate_confidence_scores.append(detections[:, 4].max())
+                    
+    def plot_roc_curve(self):
+        import matplotlib.pyplot as plt
+        from sklearn.metrics import roc_curve
+        self.target = np.ones(len(self.accumulate_confidence_scores))
+        self.prediction = np.array(self.accumulate_confidence_scores.cpu())
+        fpr, tpr, thresholds = roc_curve(self.target, self.prediction)
+        # Plot ROC curve and AUC
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr, color='blue', label='ROC curve (area = %0.2f)' % np.trapz(tpr, fpr))
+        plt.plot([0, 1], [0, 1], color='red', linestyle='--')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver Operating Characteristic (ROC) Curve')
+        plt.legend()
+        plt.show()
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    # @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
+    # @plt_settings()
+    # def plot(self, normalize=True, save_dir="", names=(), on_plot=None):
+    #     """
+    #     Plot the confusion matrix using seaborn and save it to a file.
+
+    #     Args:
+    #         normalize (bool): Whether to normalize the confusion matrix.
+    #         save_dir (str): Directory where the plot will be saved.
+    #         names (tuple): Names of classes, used as labels on the plot.
+    #         on_plot (func): An optional callback to pass plots path and data when they are rendered.
+    #     """
+    #     import seaborn  # scope for faster 'import ultralytics'
+
+    #     array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
+    #     array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
+
+    #     fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
+    #     nc, nn = self.nc, len(names)  # number of classes, names
+    #     seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
+    #     labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
+    #     ticklabels = (list(names) + ["background"]) if labels else "auto"
+    #     with warnings.catch_warnings():
+    #         warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
+    #         seaborn.heatmap(
+    #             array,
+    #             ax=ax,
+    #             annot=nc < 30,
+    #             annot_kws={"size": 8},
+    #             cmap="Blues",
+    #             fmt=".2f" if normalize else ".0f",
+    #             square=True,
+    #             vmin=0.0,
+    #             xticklabels=ticklabels,
+    #             yticklabels=ticklabels,
+    #         ).set_facecolor((1, 1, 1))
+    #     title = "Confusion Matrix" + " Normalized" * normalize
+    #     ax.set_xlabel("True")
+    #     ax.set_ylabel("Predicted")
+    #     ax.set_title(title)
+    #     plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
+    #     fig.savefig(plot_fname, dpi=250)
+    #     plt.close(fig)
+    #     if on_plot:
+    #         on_plot(plot_fname)
