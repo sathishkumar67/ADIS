@@ -7,7 +7,5 @@ msgpack==1.1.0
 opencv-python==4.11.0.86
 tqdm==4.67.1
 pyarrow==19.0.1
-numpy
-torchmetrics
-# numpy==2.2.4
-# torchmetrics==1.7.1
+numpy==1.26.4
+torchmetrics==1.7.1
