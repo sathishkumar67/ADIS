@@ -3,7 +3,6 @@ albumentations==2.0.5
 optuna==4.2.1
 huggingface-hub==0.30.2
 lmdb==1.6.2
-msgpack==1.1.0
 opencv-python==4.11.0.86
 tqdm==4.67.1
 numpy==1.26.4
