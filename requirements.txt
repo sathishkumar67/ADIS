@@ -1,3 +1,0 @@
-albumentations
-optuna
-huggingface-hub
