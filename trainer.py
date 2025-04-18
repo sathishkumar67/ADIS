@@ -410,6 +410,12 @@ class DetectionTrainer:
                 cls_loss_cum += self.loss_items[1].item()
                 dfl_loss_cum += self.loss_items[2].item()
                 batch_count += 1
+                
+                # Calculate and print average losses per epoch
+                box_loss_avg = box_loss_cum / batch_count
+                cls_loss_avg = cls_loss_cum / batch_count
+                dfl_loss_avg = dfl_loss_cum / batch_count
+                
 
                 # Log
                 if RANK in {-1, 0}:  # if verbose
@@ -430,11 +436,6 @@ class DetectionTrainer:
 
                 self.run_callbacks("on_train_batch_end")
             if RANK == -1:
-                # Calculate and print average losses per epoch
-                box_loss_avg = box_loss_cum / batch_count
-                cls_loss_avg = cls_loss_cum / batch_count
-                dfl_loss_avg = dfl_loss_cum / batch_count
-
                 LOGGER.info(f"Epoch {epoch + 1}: AVG Box Loss: {box_loss_avg:.4f} | AVG Cls Loss: {cls_loss_avg:.4f} | AVG DFL Loss: {dfl_loss_avg:.4f}")
             elif RANK == 0:
                 loss_items = torch.tensor([box_loss_avg, cls_loss_avg, dfl_loss_avg]).to(self.device)

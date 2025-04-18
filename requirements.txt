@@ -1,0 +1,4 @@
+ultralytics
+albumentations==2.0.5
+optuna==4.2.1
+huggingface-hub==0.30.2
