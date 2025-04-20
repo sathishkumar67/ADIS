@@ -354,12 +354,7 @@ class DetectionTrainer:
                 self.train_loader.reset()
 
             self.tloss = None
-            # Initialize cumulative loss variables
-            box_loss_cum = 0
-            cls_loss_cum = 0
-            dfl_loss_cum = 0
-            batch_count = 0
-            
+
             if RANK in {-1, 0}:
                 LOGGER.info(self.progress_string())
                 pbar = TQDM(enumerate(self.train_loader), total=nb) # progress bar
@@ -405,17 +400,6 @@ class DetectionTrainer:
                             self.stop = broadcast_list[0]
                         if self.stop:  # training time exceeded
                             break
-                # Update cumulative losses
-                box_loss_cum += self.loss_items[0].item()
-                cls_loss_cum += self.loss_items[1].item()
-                dfl_loss_cum += self.loss_items[2].item()
-                batch_count += 1
-                
-                # Calculate and print average losses per epoch
-                box_loss_avg = box_loss_cum / batch_count
-                cls_loss_avg = cls_loss_cum / batch_count
-                dfl_loss_avg = dfl_loss_cum / batch_count
-                
 
                 # Log
                 if RANK in {-1, 0}:  # if verbose
@@ -435,14 +419,8 @@ class DetectionTrainer:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
-            if RANK == -1:
-                LOGGER.info(f"Epoch {epoch + 1}: AVG Box Loss: {box_loss_avg:.4f} | AVG Cls Loss: {cls_loss_avg:.4f} | AVG DFL Loss: {dfl_loss_avg:.4f}")
-            elif RANK == 0:
-                loss_items = torch.tensor([box_loss_avg, cls_loss_avg, dfl_loss_avg]).to(self.device)
-                dist.all_reduce(loss_items)
-                box_loss_avg, cls_loss_avg, dfl_loss_avg = loss_items.tolist()
-                LOGGER.info(f"Epoch {epoch + 1}: AVG Box Loss: {box_loss_avg:.4f} | AVG Cls Loss: {cls_loss_avg:.4f} | AVG DFL Loss: {dfl_loss_avg:.4f}")
 
+            # Epoch end
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")
             if RANK in {-1, 0}:
