@@ -433,19 +433,12 @@ class DetectionTrainer:
                 if self.args.time:
                     self.stop |= (time.time() - self.train_time_start) > (self.args.time * 3600)
 
-                # print validation metrics
-                total_val_loss = self.metrics["val/box_loss"] + self.metrics["val/cls_loss"] + self.metrics["val/dfl_loss"]
-                LOGGER.info(f"Epoch {epoch + 1}: AVG Val Box Loss: {self.metrics['val/box_loss']:.4f} | AVG Val Cls Loss: {self.metrics['val/cls_loss']:.4f} | AVG Val DFL Loss: {self.metrics['val/dfl_loss']:.4f} | Total Val Loss: {total_val_loss:.4f}")
-                # print 2 line break
-                LOGGER.info("\n")
-                LOGGER.info("\n")
-
                 # pass intermediate results to BOHB
                 if self.bohb and self.custom_callbacks:
-                    self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 4), epoch + 1)
+                    self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 6), epoch + 1)
                 
                 if final_epoch:
-                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 4)
+                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 6)
                     
                 # Save model
                 if self.args.save or final_epoch:
