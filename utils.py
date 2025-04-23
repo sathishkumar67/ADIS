@@ -17,6 +17,7 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
 
+
 def make_anchors(feats, strides, grid_cell_offset=0.5):
     """Generate anchors from features."""
     anchor_points, stride_tensor = [], []
@@ -31,6 +32,7 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
         stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
     return torch.cat(anchor_points), torch.cat(stride_tensor)
 
+
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     """Transform distance(ltrb) to box(xywh or xyxy)."""
     lt, rb = distance.chunk(2, dim)
@@ -41,6 +43,7 @@ def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
         wh = x2y2 - x1y1
         return torch.cat((c_xy, wh), dim)  # xywh bbox
     return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
 
 def make_divisible(x, divisor):
     """
@@ -56,6 +59,7 @@ def make_divisible(x, divisor):
     if isinstance(divisor, torch.Tensor):
         divisor = int(divisor.max())  # to int
     return math.ceil(x / divisor) * divisor
+
 
 def unzip_file(zip_path: str, target_dir: str) -> None:
     """
@@ -109,6 +113,9 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(nc)}    # False positives per class
         self.class_fn = {i: 0 for i in range(nc)}    # False negatives per class
         self.class_gt = {i: 0 for i in range(nc)}    # Ground truth instances per class
+        self.true_negative = 0             # Total true negatives predicted(background)
+        self.false_negative = 0             # Total false negatives predicted(background)  
+        self.total_negatives = 0                      # Total negatives 
 
     def process_batch(self, detections, gt_bboxes, gt_cls):
         """
@@ -121,19 +128,22 @@ class AccuracyIoU:
         """
         if detections is None:
             if gt_cls.shape[0] != 0:
-                return
+                self.false_negative += 1  # No detections, objects present: FN
             else:
-                return
+                self.true_negative += 1  # No detections, no objects: TN
+                self.total_negatives += 1
         else:
             # Filter detections by confidence
             detections = detections[detections[:, 4] > self.conf]
             if gt_cls.shape[0] == 0:
                 if detections.shape[0] == 0:
-                    return
+                    self.true_negative += 1  # No detections, no objects: TN
+                    self.total_negatives += 1
                 else:
                     # Detections, no objects: FP
                     # Update class_fp for unmatched detections
                     detection_classes = detections[:, 5].int().cpu().numpy()
+                    self.total_negatives += 1
                     for dc in detection_classes:
                         self.class_fp[dc] += 1
             else:
@@ -204,7 +214,6 @@ class AccuracyIoU:
         LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
             LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-            
         # reset the values
         self.reset()
         
@@ -214,3 +223,6 @@ class AccuracyIoU:
         self.class_fp = {i: 0 for i in range(self.nc)}
         self.class_fn = {i: 0 for i in range(self.nc)}
         self.class_gt = {i: 0 for i in range(self.nc)}
+        self.true_negative = 0
+        self.total_negatives = 0
+        self.false_negative = 0
