@@ -419,8 +419,6 @@ class DetectionTrainer:
                         self.plot_training_samples(batch, ni)
 
                 self.run_callbacks("on_train_batch_end")
-
-            # Epoch end
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")
             if RANK in {-1, 0}:
@@ -828,7 +826,7 @@ class DetectionTrainer:
             LOGGER.info("Closing dataloader mosaic")
             self.train_loader.dataset.close_mosaic(hyp=copy(self.args))
 
-    def build_optimizer(self, model, name="auto", lr=0.0001, momentum=0.9, decay=1e-5):
+    def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5):
         """
         Constructs an optimizer for the given model, based on the specified optimizer name, learning rate, momentum,
         weight decay, and number of iterations.
@@ -857,7 +855,7 @@ class DetectionTrainer:
                 else:  # weight (with decay)
                     g[0].append(param)
                     
-        optimizer = optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0, fused=True)
+        optimizer = optim.AdamW(g[2], lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
 
         optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
         optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
