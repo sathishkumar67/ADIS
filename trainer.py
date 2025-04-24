@@ -428,17 +428,16 @@ class DetectionTrainer:
                 # Validation
                 if self.args.val or final_epoch or self.stopper.possible_stop or self.stop:
                     self.metrics, self.fitness = self.validate()
+                    # pass intermediate results to BOHB
+                    if self.bohb and self.custom_callbacks:
+                        self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 6), epoch + 1)
+                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 6)
+                    
+                # Save metrics
                 self.save_metrics(metrics={**self.label_loss_items(self.tloss), **self.metrics, **self.lr})
                 self.stop |= self.stopper(epoch + 1, self.fitness) or final_epoch
                 if self.args.time:
                     self.stop |= (time.time() - self.train_time_start) > (self.args.time * 3600)
-
-                # pass intermediate results to BOHB
-                if self.bohb and self.custom_callbacks:
-                    self.custom_callbacks["on_train_epoch_end"](round(self.metrics["metrics/mAP50-95(B)"], 6), epoch + 1)
-                
-                if final_epoch:
-                    self.score = round(self.metrics["metrics/mAP50-95(B)"], 6)
                     
                 # Save model
                 if self.args.save or final_epoch:
