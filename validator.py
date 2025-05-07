@@ -343,7 +343,7 @@ class DetectionValidator(BaseValidator):
                 val.params.imgIds = [int(Path(x).stem) for x in self.dataloader.dataset.im_files]  # images to eval
                 val.evaluate()
                 val.accumulate()
-                val.summarize()
+                # val.summarize()
                 if self.is_lvis:
                     val.print_results()  # explicitly call print_results
                 # update mAP50-95 and mAP50
