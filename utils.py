@@ -208,16 +208,23 @@ class AccuracyIoU:
             
         return iou_per_class, acc_per_class
 
-    def print(self):
+    def print(self, scores_dict):
         """Print IoU and accuracy for each class."""
         iou_per_class, acc_per_class = self.get_metrics()
-        LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
-            LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
-        # Print overall IoU and accuracy
-        overall_iou = sum(iou_per_class.values()) / len(iou_per_class)
-        overall_acc = sum(acc_per_class.values()) / len(acc_per_class)
-        LOGGER.info(f"Overall IoU: {overall_iou:.3f} | Overall Accuracy: {overall_acc:.3f}")
+            scores_dict[key]["IoU"] = value
+            scores_dict[key]["Accuracy"] = acc_per_class[key]
+            
+        # create a dataframe to print the results
+        import pandas as pd
+        # Create a DataFrame from the scores dictionary
+        df = pd.DataFrame(scores_dict).T
+        # Print the DataFrame
+        LOGGER.info(df.to_string(index=True, justify='left', float_format='%.3f'))
+        # # Print overall IoU and accuracy
+        # overall_iou = sum(iou_per_class.values()) / len(iou_per_class)
+        # overall_acc = sum(acc_per_class.values()) / len(acc_per_class)
+        # LOGGER.info(f"Overall IoU: {overall_iou:.3f} | Overall Accuracy: {overall_acc:.3f}")
         # reset the values
         self.reset()
         

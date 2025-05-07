@@ -200,13 +200,24 @@ class DetectionValidator(BaseValidator):
 
         # Print results per class
         if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
+            scores_dict = {}
             for i, c in enumerate(self.metrics.ap_class_index):
-                LOGGER.info(
-                    pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
-                )
-                print(*self.metrics.class_result(i), sep="\t")  # print per class results
-                print(type(self.metrics.class_result(i)))  # print per class results
-            self.accuracy_iou.print()  # print IoU and accuracy per class
+                # commented out this because using custom print statements
+                # LOGGER.info(
+                #     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
+                # )
+                precision, recall = self.metrics.class_result(i)[0:2]
+                f1_score = 2 * (precision * recall) / (precision + recall + 1e-16)
+                scores_dict[self.names[c]] = {
+                    "Number of Images": self.nt_per_image[c],
+                    "Number of Instances": self.nt_per_class[c],
+                    "Precision": precision,
+                    "Recall": recall,
+                    "mAP50": self.metrics.class_result(i)[2],
+                    "mAP50-95": self.metrics.class_result(i)[3],
+                    "F1-Score": f1_score,
+                }
+            self.accuracy_iou.print(scores_dict=scores_dict)  
         if self.args.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(
