@@ -204,6 +204,8 @@ class DetectionValidator(BaseValidator):
                 LOGGER.info(
                     pf % (self.names[c], self.nt_per_image[c], self.nt_per_class[c], *self.metrics.class_result(i))
                 )
+                print(*self.metrics.class_result(i), sep="\t")  # print per class results
+                print(type(self.metrics.class_result(i)))  # print per class results
             self.accuracy_iou.print()  # print IoU and accuracy per class
         if self.args.plots:
             for normalize in True, False:

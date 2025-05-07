@@ -214,6 +214,10 @@ class AccuracyIoU:
         LOGGER.info("Per-class IoU and Accuracy:")
         for key, value in iou_per_class.items():
             LOGGER.info(f"          {key}: IoU: {value:.3f} | Accuracy: {acc_per_class[key]:.3f}")
+        # Print overall IoU and accuracy
+        overall_iou = sum(iou_per_class.values()) / len(iou_per_class)
+        overall_acc = sum(acc_per_class.values()) / len(acc_per_class)
+        LOGGER.info(f"Overall IoU: {overall_iou:.3f} | Overall Accuracy: {overall_acc:.3f}")
         # reset the values
         self.reset()
         
