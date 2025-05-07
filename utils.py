@@ -219,6 +219,9 @@ class AccuracyIoU:
         df = pd.DataFrame(scores_dict).T
         # add a last row with the mean values
         df.loc['Average'] = df.mean()
+        # convert Images and Instances to int
+        df['Images'] = df['Images'].astype(int)
+        df['Instances'] = df['Instances'].astype(int)
         # Print the DataFrame
         LOGGER.info(df.to_string(index=True, justify='left', float_format='%.3f'))
         # reset the values
