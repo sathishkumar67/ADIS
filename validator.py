@@ -209,8 +209,8 @@ class DetectionValidator(BaseValidator):
                 precision, recall = self.metrics.class_result(i)[0:2]
                 f1_score = 2 * (precision * recall) / (precision + recall + 1e-16)
                 scores_dict[self.names[c]] = {
-                    "Number of Images": self.nt_per_image[c],
-                    "Number of Instances": self.nt_per_class[c],
+                    "Images": int(self.nt_per_image[c]),
+                    "Instances": int(self.nt_per_class[c]),
                     "Precision": precision,
                     "Recall": recall,
                     "mAP50": self.metrics.class_result(i)[2],

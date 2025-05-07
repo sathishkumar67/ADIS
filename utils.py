@@ -1,5 +1,6 @@
 from __future__ import annotations
 import torch
+import pandas as pd
 import zipfile
 import os
 import math
@@ -214,17 +215,12 @@ class AccuracyIoU:
         for key, value in iou_per_class.items():
             scores_dict[key]["IoU"] = value
             scores_dict[key]["Accuracy"] = acc_per_class[key]
-            
-        # create a dataframe to print the results
-        import pandas as pd
         # Create a DataFrame from the scores dictionary
         df = pd.DataFrame(scores_dict).T
+        # add a last row with the mean values
+        df.loc['Average'] = df.mean()
         # Print the DataFrame
         LOGGER.info(df.to_string(index=True, justify='left', float_format='%.3f'))
-        # # Print overall IoU and accuracy
-        # overall_iou = sum(iou_per_class.values()) / len(iou_per_class)
-        # overall_acc = sum(acc_per_class.values()) / len(acc_per_class)
-        # LOGGER.info(f"Overall IoU: {overall_iou:.3f} | Overall Accuracy: {overall_acc:.3f}")
         # reset the values
         self.reset()
         
