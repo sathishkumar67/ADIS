@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import *
-from epu import EPU
 
 
 class Conv(nn.Module):
@@ -15,7 +14,6 @@ class Conv(nn.Module):
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU()
-        # self.act = EPU()
 
     def forward(self, x):
         """Apply convolution, batch normalization and activation to input tensor."""
