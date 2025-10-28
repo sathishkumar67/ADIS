@@ -1,3 +1,13 @@
+"""validator.py
+
+DetectionValidator: a drop-in validator for object detection tasks.
+
+This module extends Ultralytics' BaseValidator to provide detection-specific preprocessing,
+postprocessing (NMS), metric accumulation (DetMetrics) and optional JSON export for COCO/LVIS
+evaluation. It also integrates a small per-class IoU/accuracy tracker (AccuracyIoU) used for
+additional per-class reporting.
+"""
+
 import os
 from pathlib import Path
 

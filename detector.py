@@ -1,3 +1,15 @@
+"""detector.py
+
+Utilities for parsing model YAML definitions and building the DetectionModel used by YOLOv11.
+
+This module provides `parse_model` which converts a model specification (typically loaded from a YAML)
+into a torch.nn.Sequential model built from the block primitives in `blocks.py`. It also exposes
+`DetectionModel`, a wrapper around the parsed network that provides convenience methods such as
+`predict`, `load`, `fuse`, and `info` used throughout training and evaluation workflows.
+
+The implementation aims to be compatible with multiple YOLO family conventions (v3/v5/v8/etc.) and
+contains helpers for model introspection and optimization (e.g., fusing conv+bn).
+"""
 from copy import deepcopy
 import contextlib
 import torch

@@ -1,3 +1,15 @@
+"""model.py
+
+High-level model wrapper for YOLOv11 providing a user-friendly API.
+
+`YOLO11Model` acts as a thin façade around lower-level components: it can create models from YAML
+configs, load checkpoints, run training/validation/export, and expose convenient helpers such as
+`.predict()`, `.train()`, `.val()`, `.tune()` and `.export()`.
+
+The class integrates with the repository's `DetectionModel`, `DetectionTrainer`, and
+`DetectionValidator` to run full training/evaluation workflows while keeping a small public API for
+experimentation and deployment.
+"""
 from __future__ import annotations
 import inspect
 from pathlib import Path

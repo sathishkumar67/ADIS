@@ -1,3 +1,13 @@
+"""trainer.py
+
+Training utilities and the DetectionTrainer class used to run model training loops.
+
+This module wraps dataset and optimizer setup, distributed training support (DDP), learning rate
+scheduling, checkpointing, logging and final evaluation for object detection tasks. The
+`DetectionTrainer` class is the primary entrypoint used by `YOLO11Model.train()` and is designed
+to interoperate with the project's `DetectionModel` and `DetectionValidator` components.
+"""
+
 import gc
 import math
 import random

@@ -1,3 +1,13 @@
+"""utils.py
+
+Small utility functions and lightweight helpers used across the repository.
+
+Contains tensor/geometry helpers (autopad, dist2bbox, make_anchors), IO helpers (unzip_file), and
+small metrics/aggregation helpers (AccuracyIoU). These utilities are intentionally minimal and
+designed to be dependency-light so they can be imported in environments where heavy ML
+dependencies (like GPU-enabled torch) may not be available at import time.
+"""
+
 from __future__ import annotations
 import torch
 import pandas as pd

@@ -1,3 +1,14 @@
+"""blocks.py
+
+Collection of neural network building blocks used by YOLOv11 models.
+
+This module provides commonly used modules such as Conv, DWConv, Bottleneck, C2f, C3, C3k, SPPF,
+attention-based blocks (Attention, PSABlock, C2PSA), DFL and the Detect head. These components are
+designed to be composable when building model architectures defined by YAML files.
+
+The docstrings on the classes explain the purpose and expected tensor shapes where relevant. This file
+avoids performing any model I/O and focuses solely on layer implementations.
+"""
 from __future__ import annotations
 import math
 import torch
@@ -17,6 +28,9 @@ class Conv(nn.Module):
 
     def forward(self, x):
         """Apply convolution, batch normalization and activation to input tensor."""
+        # conv -> bn -> activation is a common sequence used across the network
+        # Input: x shape (B, C_in, H, W)
+        # Output: activated tensor shape (B, C_out, H_out, W_out)
         return self.act(self.bn(self.conv(x)))
 
     def forward_fuse(self, x):
@@ -56,8 +70,12 @@ class C2f(nn.Module):
 
     def forward(self, x):
         """Forward pass through C2f layer."""
+        # cv1 expands channels to 2*c hidden channels then we split along channel dim
+        # y[0] is the first split (skip connection), y[1] is processed by the Bottleneck blocks
         y = list(self.cv1(x).chunk(2, 1))
+        # apply each Bottleneck/inner block to the second partition and append its output
         y.extend(m(y[-1]) for m in self.m)
+        # concatenate along channel dim and reduce to c2 channels via cv2
         return self.cv2(torch.cat(y, 1))
 
     def forward_split(self, x):
@@ -82,6 +100,8 @@ class C3(nn.Module):
 
     def forward(self, x):
         """Forward pass through the CSP bottleneck with 2 convolutions."""
+        # Apply cv1 -> m (sequence of bottlenecks) and cv2 in parallel, then concatenate
+        # This pattern preserves features from the identity path and the transformed path.
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
 
 
@@ -119,9 +139,17 @@ class SPPF(nn.Module):
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 
     def forward(self, x):
-        """Forward pass through Ghost Convolution block."""
+        """Forward pass through SPPF block.
+
+        The SPPF block pools the feature map multiple times with the same kernel size
+        to capture multi-scale context, then concatenates pooled features and reduces
+        them with a 1x1 conv (cv2).
+        """
+        # initial 1x1 conv reduces channels
         y = [self.cv1(x)]
+        # apply maxpool repeatedly to gather multi-scale receptive fields
         y.extend(self.m(y[-1]) for _ in range(3))
+        # concatenate along channels and restore desired output channels
         return self.cv2(torch.cat(y, 1))
 
 
@@ -168,24 +196,24 @@ class Attention(nn.Module):
         """
         B, C, H, W = x.shape
         N = H * W
+        # qkv conv projects input to concatenated q/k/v along channel dim
         qkv = self.qkv(x)
+        # reshape into (B, num_heads, key_dim*2 + head_dim, N) then split into q, k, v
         q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
             [self.key_dim, self.key_dim, self.head_dim], dim=2
         )
 
-        # Original implementation
-        # attn = (q.transpose(-2, -1) @ k) * self.scale
-        # attn = attn.softmax(dim=-1)
-        # x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
-        # x = self.proj(x)
-        # return x
-        
+        # Transpose to shape used by scaled_dot_product_attention: (B, num_heads, N, head_dim)
         q = q.transpose(-2, -1)
         k = k.transpose(-2, -1)
         v = v.transpose(-2, -1)
 
-        # Scaled dot-product attention(Flash Attention)
-        attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale).transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+        # Use PyTorch's optimized scaled_dot_product_attention (Flash Attention where available).
+        # Output shape after attention: (B, num_heads, N, head_dim)
+        attn = F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=self.scale)
+
+        # Rearrange back to (B, C, H, W) and add positional encoding before final projection
+        attn = attn.transpose(1, 2).contiguous().view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
         return self.proj(attn)
 
 
@@ -292,8 +320,14 @@ class DFL(nn.Module):
         self.c1 = c1
 
     def forward(self, x):
-        """Applies a transformer layer on input tensor 'x' and returns a tensor."""
+        """Apply Distribution Focal Loss projection.
+
+        The input `x` is expected to contain logits for distributional localization. We reshape the
+        incoming tensor to (batch, 4, c1, anchors), apply softmax across the distribution dimension,
+        project via a fixed-weight conv and return the predicted distances.
+        """
         b, _, a = x.shape  # batch, channels, anchors
+        # reshape -> apply softmax across distribution channels -> project -> reshape back
         return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
 
 
@@ -345,36 +379,50 @@ class Detect(nn.Module):
         return y if self.export else (y, x)
 
     def _inference(self, x):
-        """Decode predicted bounding boxes and class probabilities based on multiple-level feature maps."""
+        """Decode predicted bounding boxes and class probabilities from feature maps.
+
+        Steps:
+        1. Flatten multi-scale feature maps into a single tensor `x_cat` with channels = no (outputs per anchor).
+        2. Split `x_cat` into localization (`box`) and classification (`cls`) heads according to `reg_max`.
+        3. Apply DFL projection on box logits then decode into xywh/xyxy and scale by strides.
+        4. Return concatenated boxes and class probabilities.
+        """
         # Inference path
-        shape = x[0].shape  # BCHW
+        shape = x[0].shape  # BCHW of the first feature map
+        # Concatenate flattened feature maps across the spatial dimension
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
+
+        # Recompute anchors/strides if dynamic shape or when exporting in certain formats
         if self.format != "imx" and (self.dynamic or self.shape != shape):
             self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
             self.shape = shape
 
-        if self.export and self.format in {"saved_model", "pb", "tflite", "edgetpu", "tfjs"}:  # avoid TF FlexSplitV ops
+        # Split into box (regression) and cls (classification) parts
+        if self.export and self.format in {"saved_model", "pb", "tflite", "edgetpu", "tfjs"}:
             box = x_cat[:, : self.reg_max * 4]
             cls = x_cat[:, self.reg_max * 4 :]
         else:
             box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
 
+        # Handle special export formats that require numerical normalization
         if self.export and self.format in {"tflite", "edgetpu"}:
             # Precompute normalization factor to increase numerical stability
-            # See https://github.com/ultralytics/ultralytics/issues/7371
             grid_h = shape[2]
             grid_w = shape[3]
             grid_size = torch.tensor([grid_w, grid_h, grid_w, grid_h], device=box.device).reshape(1, 4, 1)
             norm = self.strides / (self.stride[0] * grid_size)
             dbox = self.decode_bboxes(self.dfl(box) * norm, self.anchors.unsqueeze(0) * norm[:, :2])
         elif self.export and self.format == "imx":
+            # IMX format expects different scaling/ordering
             dbox = self.decode_bboxes(
                 self.dfl(box) * self.strides, self.anchors.unsqueeze(0) * self.strides, xywh=False
             )
             return dbox.transpose(1, 2), cls.sigmoid().permute(0, 2, 1)
         else:
+            # Default path: apply DFL decode then scale by strides to convert to pixel coordinates
             dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
 
+        # Concatenate decoded boxes and class probabilities (sigmoid)
         return torch.cat((dbox, cls.sigmoid()), 1)
 
     def decode_bboxes(self, bboxes, anchors, xywh=True):
