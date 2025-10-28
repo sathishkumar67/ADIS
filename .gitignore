@@ -1,5 +1,6 @@
 /ultralytics
 /YOLOv11-pt
+/.vscode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

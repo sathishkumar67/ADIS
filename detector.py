@@ -34,7 +34,18 @@ except ImportError:
 
 
 def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
-    """Parse a YOLO model.yaml dictionary into a PyTorch model."""
+    """
+    Parses a YOLO model dictionary from a YAML file into a PyTorch model.
+
+    Args:
+        d (dict): A dictionary representing the model architecture, usually loaded from a YAML file.
+        ch (int): The number of input channels for the model.
+        verbose (bool, optional): If True, logs information about the model architecture. Defaults to True.
+
+    Returns:
+        (nn.Sequential, list): A tuple containing the constructed PyTorch model (as an nn.Sequential)
+                               and a sorted list of layer indices to be saved for feature concatenation.
+    """
     import ast
     # Args
     legacy = True  # backward compatibility for v3/v5/v8/v9 models
@@ -52,6 +63,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
     ch = [ch]
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    # Define sets of modules for specific handling
     base_modules = frozenset(
         {
             Conv,
@@ -73,7 +85,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             C2PSA
         }
     )
+    # Iterate through the model definition (backbone and head)
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
+        # Dynamically get the module class from its name
         m = (
             getattr(torch.nn, m[3:])
             if "nn." in m
@@ -81,11 +95,15 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             if "torchvision.ops." in m
             else globals()[m]
         )  # get module
+        # Evaluate string arguments as Python expressions
         for j, a in enumerate(args):
             if isinstance(a, str):
                 with contextlib.suppress(ValueError):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
+        # Apply depth gain to the number of repetitions
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
+        
+        # Handle different module types with specific logic
         if m in base_modules:
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
@@ -112,13 +130,18 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             args = [*args[1:]]
         else:
             c2 = ch[f]
-
+        
+        # Create the module or a sequence of modules
         m_ = torch.nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
+        
+        # Attach metadata to the module
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         if verbose:
             LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m_.np:10.0f}  {t:<45}{str(args):<30}")  # print
+        
+        # Add the 'from' index to the save list for feature concatenation
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
@@ -128,11 +151,26 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
 
 
 class DetectionModel(nn.Module):
-    """YOLO detection model."""
+    """
+    YOLO detection model. This class wraps the parsed model and provides methods for forward pass,
+    inference, fusing layers, and loading weights.
+    """
     def __init__(self, cfg="yolo11n.yaml", ch=3, nc=None, verbose=True):  # model, input channels, number of classes
-        """Initialize the YOLO detection model with the given config and parameters."""
+        """
+        Initializes the YOLO detection model.
+
+        Args:
+            cfg (str or dict, optional): Path to the model configuration YAML file or a dictionary
+                                        representing the model architecture. Defaults to "yolo11n.yaml".
+            ch (int, optional): Number of input channels. Defaults to 3.
+            nc (int, optional): Number of classes. If provided, it overrides the value in the YAML file.
+                                Defaults to None.
+            verbose (bool, optional): If True, prints model information during initialization.
+                                    Defaults to True.
+        """
         super().__init__()
         self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
+        
         # Define model
         ch = self.yaml["ch"] = self.yaml.get("ch", ch)  # input channels
         if nc and nc != self.yaml["nc"]:
@@ -141,15 +179,17 @@ class DetectionModel(nn.Module):
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
         self.names = {i: f"{i}" for i in range(self.yaml["nc"])}  # default names dict
         self.inplace = self.yaml.get("inplace", True)
-        # Build strides
+        
+        # Build strides and initialize the detection head
         m = self.model[-1]  # Detect()
         if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
             s = 256  # 2x min stride
             m.inplace = self.inplace
             def _forward(x):
-                """Performs a forward pass through the model, handling different Detect subclass types accordingly."""
+                """A helper function for a single forward pass to compute strides."""
                 return self.forward(x)
 
+            # Calculate stride based on a dummy forward pass
             m.stride = torch.tensor([s / x.shape[-2] for x in _forward(torch.zeros(1, ch, s, s))])  # forward
             self.stride = m.stride
             m.bias_init()  # only run once
@@ -162,17 +202,18 @@ class DetectionModel(nn.Module):
     
     def forward(self, x, *args, **kwargs):
         """
-        Perform forward pass of the model for either training or inference.
-
-        If x is a dict, calculates and returns the loss for training. Otherwise, returns predictions for inference.
+        Performs a forward pass of the model. This method routes the input to either
+        the loss function for training or the prediction function for inference.
 
         Args:
-            x (torch.Tensor | dict): Input tensor for inference, or dict with image tensor and labels for training.
+            x (torch.Tensor | dict): Input tensor for inference, or a dictionary containing
+                                     the image tensor and labels for training.
             *args (Any): Variable length argument list.
             **kwargs (Any): Arbitrary keyword arguments.
 
         Returns:
-            (torch.Tensor): Loss if x is a dict (training), or network predictions (inference).
+            (torch.Tensor): The loss tensor if `x` is a dict (training), otherwise the
+                            network predictions (inference).
         """
         if isinstance(x, dict):  # for cases of training and validating while training.
             return self.loss(x, *args, **kwargs)
@@ -180,24 +221,29 @@ class DetectionModel(nn.Module):
 
     def predict(self, x, profile=False, visualize=False, embed=None, augment=False):
         """
-        Perform a forward pass through the network.
+        Performs a forward pass through the network for inference.
 
         Args:
             x (torch.Tensor): The input tensor to the model.
-            profile (bool):  Print the computation time of each layer if True, defaults to False.
-            visualize (bool): Save the feature maps of the model if True, defaults to False.
-            augment (bool): Augment image during prediction, defaults to False.
-            embed (list, optional): A list of feature vectors/embeddings to return.
+            profile (bool, optional): If True, prints the computation time and FLOPs of each layer.
+                                    Defaults to False.
+            visualize (bool, optional): If True, saves feature maps of the model. Defaults to False.
+            augment (bool, optional): If True, applies augmentation during prediction. Defaults to False.
+            embed (list, optional): A list of layer indices from which to return feature vectors/embeddings.
+                                    Defaults to None.
 
         Returns:
-            (torch.Tensor): The last output of the model.
+            (torch.Tensor): The output of the model. If `embed` is used, returns concatenated embeddings.
         """
         y, dt, embeddings = [], [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
+                # Get input from specified earlier layers
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+            
+            # Profile layer-wise performance
             if profile:
-                # Profile the computation time and FLOPs of a single layer of the model on a given input. Appends the results to the provided list.
+                # Profile the computation time and FLOPs of a single layer
                 c = m == self.model[-1] and isinstance(x, list)  # is final layer list, copy input as inplace fix
                 flops = thop.profile(m, inputs=[x.copy() if c else x], verbose=False)[0] / 1e9 * 2 if thop else 0  # GFLOPs
                 t = time_sync()
@@ -209,10 +255,16 @@ class DetectionModel(nn.Module):
                 LOGGER.info(f"{dt[-1]:10.2f} {flops:10.2f} {m.np:10.0f}  {m.type}")
                 if c:
                     LOGGER.info(f"{sum(dt):10.2f} {'-':>10s} {'-':>10s}  Total")
-            x = m(x)  # run
-            y.append(x if m.i in self.save else None)  # save output
+            
+            # Run the module
+            x = m(x)
+            y.append(x if m.i in self.save else None)  # save output if in savelist
+            
+            # Visualize feature maps if requested
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
+            
+            # Extract embeddings if requested
             if embed and m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max(embed):
@@ -221,11 +273,15 @@ class DetectionModel(nn.Module):
 
     def fuse(self, verbose=True):
         """
-        Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer, in order to improve the
-        computation efficiency.
+        Fuses Conv2d and BatchNorm2d layers into a single convolutional layer to improve
+        computation efficiency during inference. This operation is performed in-place.
+
+        Args:
+            verbose (bool, optional): If True, prints model information after fusing.
+                                      Defaults to True.
 
         Returns:
-            (torch.nn.Module): The fused model is returned.
+            (nn.Module): The fused model.
         """
         if not self.is_fused():
             for m in self.model.modules():
@@ -239,37 +295,41 @@ class DetectionModel(nn.Module):
 
     def is_fused(self, thresh=10):
         """
-        Check if the model has less than a certain threshold of BatchNorm layers.
+        Checks if the model has been fused by counting the number of BatchNorm layers.
 
         Args:
-            thresh (int, optional): The threshold number of BatchNorm layers. Default is 10.
+            thresh (int, optional): The threshold number of BatchNorm layers. If the count
+                                    is below this value, the model is considered fused.
+                                    Defaults to 10.
 
         Returns:
-            (bool): True if the number of BatchNorm layers in the model is less than the threshold, False otherwise.
+            (bool): True if the number of BatchNorm layers is less than the threshold, False otherwise.
         """
         bn = tuple(v for k, v in torch.nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
         return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
 
     def info(self, detailed=False, verbose=True, imgsz=640):
         """
-        Prints model information.
+        Prints detailed information about the model, including layers, parameters, and FLOPs.
 
         Args:
-            detailed (bool): if True, prints out detailed information about the model. Defaults to False
-            verbose (bool): if True, prints out the model information. Defaults to False
-            imgsz (int): the size of the image that the model will be trained on. Defaults to 640
+            detailed (bool, optional): If True, prints detailed information about each layer.
+                                       Defaults to False.
+            verbose (bool, optional): If True, prints the model information. Defaults to True.
+            imgsz (int, optional): The input image size used for calculating FLOPs. Defaults to 640.
         """
         return model_info(self, detailed=detailed, verbose=verbose, imgsz=imgsz)
 
     def _apply(self, fn):
         """
-        Applies a function to all the tensors in the model that are not parameters or registered buffers.
+        Applies a function to all the tensors in the model that are not parameters or
+        registered buffers, such as moving them to a different device.
 
         Args:
-            fn (function): the function to apply to the model
+            fn (function): The function to apply (e.g., `lambda t: t.to(device)`).
 
         Returns:
-            (BaseModel): An updated BaseModel object.
+            (nn.Module): The model with the function applied.
         """
         self = super()._apply(fn)
         m = self.model[-1]  # Detect()
@@ -281,11 +341,12 @@ class DetectionModel(nn.Module):
 
     def load(self, weights, verbose=True):
         """
-        Load the weights into the model.
+        Loads pre-trained weights into the model from a state dictionary.
 
         Args:
-            weights (dict | torch.nn.Module): The pre-trained weights to be loaded.
-            verbose (bool, optional): Whether to log the transfer progress. Defaults to True.
+            weights (dict | torch.nn.Module): A state dictionary or a PyTorch model containing
+                                              the pre-trained weights.
+            verbose (bool, optional): If True, logs the transfer progress. Defaults to True.
         """
         model = weights["model"] if isinstance(weights, dict) else weights  # torchvision models are not dicts
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
@@ -296,11 +357,16 @@ class DetectionModel(nn.Module):
 
     def loss(self, batch, preds=None):
         """
-        Compute loss.
+        Computes the loss for a given batch of data. Initializes the criterion if it doesn't exist.
 
         Args:
-            batch (dict): Batch to compute loss on
-            preds (torch.Tensor | List[torch.Tensor]): Predictions.
+            batch (dict): A dictionary containing the input images and ground truth labels.
+            preds (torch.Tensor | List[torch.Tensor], optional): Pre-computed model predictions.
+                                                                  If None, a forward pass is performed.
+                                                                  Defaults to None.
+        
+        Returns:
+            (torch.Tensor): The calculated loss tensor.
         """
         if getattr(self, "criterion", None) is None:
             self.criterion = self.init_criterion()
@@ -309,5 +375,10 @@ class DetectionModel(nn.Module):
         return self.criterion(preds, batch)
     
     def init_criterion(self):
-        """Initialize the loss criterion for the DetectionModel."""
+        """
+        Initializes the loss criterion for the detection model.
+
+        Returns:
+            (nn.Module): The loss criterion module (e.g., v8DetectionLoss).
+        """
         return v8DetectionLoss(self)
