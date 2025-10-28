@@ -1,187 +1,204 @@
 # Animal Intrusion Detection System (ADIS)
 
-This repository contains an implementation of an Animal Intrusion Detection System (ADIS) built on top of
-the YOLOv11 family of object detectors. It provides code for model definition, training/validation utilities,
-dataset handling, and evaluation (including a `DetectionValidator` class used for detection validation and COCO/LVIS export).
+ADIS is a compact, end-to-end repository for animal detection built around the YOLOv11 family.
+It provides model definitions, training and validation utilities, dataset helpers, evaluation tools
+and example notebooks to train, tune and evaluate object detection models on custom datasets.
 
-This README explains how to set up the project, run basic validation/evaluation, and use the `DetectionValidator`.
-
+This README documents how to set up the project, run training/tuning/evaluation, and use the
+key components such as `YOLO11Model`, `DetectionTrainer`, and `DetectionValidator`.
 ---
 
 ## Table of contents
 - Project overview
-- Repository structure
+- Features
+- Repository layout
 - Requirements
 - Installation (Windows / PowerShell)
-- Quick start (validation / evaluation)
-- Using `DetectionValidator` (example)
-- Notebooks and scripts
-- Contributing and license
+- Quick start
+  - Train
+  - Tune (Optuna)
+  - Evaluate / Validate
+  - Inference
+- Notebooks
+- Key components (trainer, validator, utils)
+- Configuration and checkpoints
+- Troubleshooting
+- Contributing
+- License
 
 ---
 
 ## Project overview
 
-ADIS is designed to detect animals in images and video using YOLOv11 models. It includes utilities for
-dataset building, evaluation, saving predictions in COCO/LVIS format, plotting, and a small set of
-model variants (nano/small/medium) tuned for different deployment needs.
+ADIS (Animal Intrusion Detection System) aims to provide a practical, reproducible starting point for
+building animal detection systems using YOLOv11. It layers model definitions and training workflows
+on top of Ultralytics utilities and includes convenience wrappers and notebooks for common tasks:
 
-The code in this repository is intended for researchers and practitioners who want a compact, runnable
-baseline for animal detection using the ultralytics YOLOv11 codebase.
+- Training and checkpointing (see `trainer.py` / `YOLOv11_training.ipynb`)
+- Hyperparameter tuning with Optuna (see `YOLOv11_tunning.ipynb`)
+- Validation and COCO/LVIS JSON export via `DetectionValidator` (`validator.py`)
+- Lightweight utilities for I/O and per-class diagnostics (`utils.py`)
 
+The repository is suitable for experiments (research) and as a starting point for deployment.
 ---
 
-## Repository structure (important files)
+## Repository layout
 
-- `model.py`          : model definitions and network blocks
-- `blocks.py`         : building blocks used by models
-- `detector.py`       : detection utilities / wrappers
-- `trainer.py`        : training loop (if present / configured)
-- `validator.py`      : validation utilities (contains `DetectionValidator`)
-- `utils.py`          : helper functions (accuracy, plotting, etc.)
-- `requirements.txt`  : Python dependencies
-- `config/`           : model config YAML files (yolo11*.yaml)
-- `YOLOv11_evaluate.ipynb`: notebook for running evaluation and visualization
+Top-level files and folders (high level):
 
-Refer to the file headers for more implementation details.
+- `model.py`           - High-level `YOLO11Model` wrapper for train/val/export/predict.
+- `detector.py`       - Model parsing and `DetectionModel` implementation (network builder).
+- `blocks.py`         - Neural network building blocks used by the model definitions.
+- `trainer.py`        - `DetectionTrainer` class: training loop, optimizer, scheduler, EMA, DDP support.
+- `validator.py`      - `DetectionValidator` class: validation loop, NMS, metrics, COCO export.
+- `utils.py`          - Small helpers (autopad, anchors, unzip, AccuracyIoU diagnostics).
+- `config/`           - YAML model definitions (e.g. `yolo11n.yaml`, `yolo11m.yaml`, ...).
+- `study/`            - saved Optuna study folders (per-model tuning results).
+- `requirements.txt`  - Python dependencies used by the notebooks and scripts.
+- `YOLOv11_*.ipynb`   - Example notebooks for training, tuning and evaluation.
+
+See inline module docstrings for further implementation details.
 
 ---
 
 ## Requirements
 
-Primary dependency:
-- Python 3.8+ (recommended 3.8–3.11)
-- PyTorch (CUDA-enabled if using GPU)
-- ultralytics (YOLOv11 utilities used by this code)
+Minimum environment:
 
-Other packages are listed in `requirements.txt`. To install them in a PowerShell on Windows:
+- Python 3.8+
+- PyTorch (match to your CUDA/cpu setup)
+- Ultralytics package (repository uses Ultralytics utilities)
+
+Install requirements (PowerShell example):
 
 ```powershell
-python -m venv .venv; 
-.\.venv\Scripts\Activate.ps1; 
-python -m pip install --upgrade pip; 
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-If you plan to run COCO/LVIS evaluation (export + official mAP), also install:
+Optional (for official COCO/LVIS evaluation):
 
 ```powershell
-pip install pycocotools  # for COCO evaluation
-# or for LVIS:
-pip install lvis
+pip install pycocotools  # COCO evaluation
+# or
+pip install lvis         # LVIS evaluation
 ```
 
-Note: installing `pycocotools` on Windows sometimes requires Visual Studio Build Tools or pre-built wheels.
-
+Note: `pycocotools` can be difficult to build on Windows; use prebuilt wheels or conda where available.
 ---
 
-## Quick start — run validation/evaluation
+## Quick start
 
-1. Activate your virtual environment (see Requirements).
-2. Ensure your dataset config is available in `self.data` or use paths in `config/*.yaml`.
-3. Use the included notebook `YOLOv11_evaluate.ipynb` to run evaluation interactively, or run a small
-   Python snippet to construct and run the `DetectionValidator` (example below).
+Below are short examples to get you started. For interactive workflows prefer the notebooks.
 
-Example: programmatic validation using the `DetectionValidator` class
+1) Train
+
+```powershell
+# activate venv (PowerShell)
+.\.venv\Scripts\Activate.ps1
+python -c "from model import YOLO11Model; YOLO11Model('').train(data='data.yaml', epochs=10)"
+```
+
+2) Tune (Optuna)
+
+Open `YOLOv11_tunning.ipynb` and run the tuning notebook. It uses Optuna to search hyperparameters and
+saves studies under `study/`.
+
+3) Evaluate / Validate
+
+Use the `YOLOv11_evaluate.ipynb` notebook for step-by-step evaluation. Programmatically you can call:
 
 ```python
 from types import SimpleNamespace
 from validator import DetectionValidator
 
-# Minimal example args namespace - adapt paths/flags to your setup
-args = SimpleNamespace(
-    split='val', # key into data dict for validation files
-    conf=0.001,
-    iou=0.65,
-    save_json=False,
-    save_txt=False,
-    save_hybrid=False,
-    save_conf=0.25,
-    plots=False,
-    val=True,
-    workers=4,
-    half=False,
-    single_cls=False,
-    agnostic_nms=False,
-    max_det=300,
-    plots_dir=None,
-    task='detect',
-    verbose=True
-)
+args = SimpleNamespace(split='val', conf=0.001, iou=0.65, save_json=False, save_txt=False, save_hybrid=False,
+             save_conf=0.25, plots=False, val=True, workers=4, half=False, single_cls=False,
+             agnostic_nms=False, max_det=300, task='detect', verbose=True)
 
-# If you have a model object `model` that exposes `.names` etc. call as follows:
 validator = DetectionValidator(dataloader=None, save_dir='runs/val', pbar=None, args=args)
-# initialize metrics using a model object - validator.init_metrics(model)
-# then run validator on your dataloader (the class follows ultralytics BaseValidator patterns)
+# validator.init_metrics(model)  # call with a DetectionModel or path
+# validator()  # run validation via BaseValidator API
 ```
 
-The repository includes a `YOLOv11_evaluate.ipynb` notebook that demonstrates setting up the dataloader,
-running the validator, plotting predictions, and exporting COCO-format JSON for official evaluation.
+4) Inference
 
+After training, load the best checkpoint and run inference using `YOLO11Model`:
+
+```python
+from model import YOLO11Model
+model = YOLO11Model('runs/detect/train/weights/best.pt')
+results = model.predict('path/to/image.jpg')
+results.show()
+```
 ---
 
-## `DetectionValidator` (summary)
+## Key components
 
-`DetectionValidator` (defined in `validator.py`) is a drop-in validator for detection tasks that extends
-`ultralytics.engine.validator.BaseValidator`. Key features:
+Below are brief descriptions of the most relevant modules. See each file's docstring for details.
 
-- Preprocesses batches (moves tensors to the configured device and normalizes images).
-- Postprocesses model outputs (applies NMS and rescales boxes to original image coordinates).
-- Accumulates metrics required for mAP computation (via `DetMetrics`) and builds confusion matrices.
-- Optionally exports predictions to COCO or LVIS JSON and runs official mAP evaluation if those libraries are installed.
+- `model.py` / `YOLO11Model` — high-level user-facing API. Use this to train, validate, tune, export and predict.
 
-Usage notes:
-- The class expects an `args` object containing validation options (conf/iou thresholds, save flags, plots, etc.).
-- You typically call `validator.init_metrics(model)` before running validation to set up names, class maps, and helpers.
-- See `validator.py` docstrings for per-method behavior (preprocess, postprocess, update_metrics, eval_json, ...).
+- `detector.py` / `DetectionModel` — lower-level model class that builds a PyTorch model from YAML specs (uses `blocks.py`).
 
+- `trainer.py` / `DetectionTrainer` — training loop, optimizer construction, LR scheduling, DDP support, EMA, checkpointing.
+
+- `validator.py` / `DetectionValidator` — validation loop built on `ultralytics.engine.validator.BaseValidator`; handles NMS,
+  metric accumulation (mAP via `DetMetrics`), confusion matrices, optional COCO/LVIS JSON export and evaluation.
+
+- `utils.py` / `AccuracyIoU` — small helpers. `AccuracyIoU` provides additional per-class IoU & accuracy diagnostics
+  used during verbose validation reporting.
 ---
 
-## Notebooks and scripts
+## Notebooks and examples
 
-- `YOLOv11_evaluate.ipynb`: Guided evaluation and visualization — a good starting point to quickly run validation
-  on your dataset and visualize results.
-- `trainer.py`: (if present) training loop and hyperparameter handling
-- `validator.py`: validation helpers and `DetectionValidator`
+Notebook-driven examples are provided to make common workflows easier:
 
+- `YOLOv11_training.ipynb` — end-to-end training example (download dataset, write data.yaml, train).
+- `YOLOv11_tunning.ipynb` — Optuna based hyperparameter tuning example that uses the `YOLO11Model.train` API.
+- `YOLOv11_evaluate.ipynb` — model evaluation and quick inference examples (download model, validate, run inference).
+
+Use these notebooks in Colab / Kaggle or locally. They show how to download dataset/model from Hugging Face hub,
+prepare data.yaml and run training/tuning/evaluation without wiring up CLI arguments.
 ---
 
-## Configuration
+## Configuration & checkpoints
 
-Model and dataset configuration YAMLs are stored under `config/` (e.g. `yolo11n.yaml`, `yolo11s.yaml`, `yolo11m.yaml`).
-Edit these files to change model architecture, dataset paths, or training/validation settings.
+- Model YAMLs: `config/*.yaml` contain model architecture definitions (width/depth multipliers, heads, anchors).
+- Checkpoints saved by training are written to `runs/` with `weights/last.pt` and `weights/best.pt`.
+- Optuna studies (when tuning) are saved under `study/` (subfolders per model variant).
 
+When resuming training, `DetectionTrainer` inspects the checkpoint to restore optimizer/EMA state and args.
 ---
 
 ## Troubleshooting
 
-- If you see errors importing `ultralytics` or `pycocotools`, ensure you have installed the packages in the same
-  Python environment you're running. On Windows, `pycocotools` installation can be tricky — use pre-built wheels
-  or install via conda if possible.
-- If GPU memory is exhausted, try lowering the batch size or using a smaller model (e.g., `yolo11n`).
-- For image I/O issues, check that the paths inside your dataset config point correctly to the image files.
+- pycocotools on Windows: prefer pre-built wheels or conda packages; building from source often requires Visual Studio Build Tools.
+- GPU OOM: reduce `batch` or `imgsz`, or use smaller model (yolo11n -> yolo11s -> yolo11m).
+- Dataset paths: ensure `data.yaml` points to valid `train/val/test` folders and image files' names are numeric if you use COCO eval id mapping.
 
+If you hit a runtime error, include the traceback and environment (python/pytorch versions) when opening an issue.
 ---
 
 ## Contributing
 
-Contributions are welcome. Please follow these guidelines:
+Contributions, bug reports and improvements are very welcome. Suggested flow:
 
-1. Open an issue describing the feature or bug.
-2. Create a branch for your change.
-3. Submit a PR with clear description and tests where applicable.
-
----
+1. Open an issue describing the change or bug.
+2. Create a topic branch for your changes.
+3. Submit a PR with tests / repro instructions where relevant.
 
 ## License & contact
 
-This project includes a `LICENSE` file in the repository root. Please check the license for permitted uses.
+This repository is licensed under the MIT License — see `LICENSE` in the project root.
 
-For questions or collaboration, open an issue in this repository or contact the maintainer.
-
----
+For questions or collaboration, open an issue or submit a pull request.
 
 ## Acknowledgements
 
-This project leverages the Ultralytics YOLO ecosystem and PyTorch. Thanks to upstream authors for their
+This project builds on PyTorch and Ultralytics tooling. Thanks to upstream authors for the reference
+implementations and utilities that made this repository possible.
+
 excellent tooling and reference implementations.
